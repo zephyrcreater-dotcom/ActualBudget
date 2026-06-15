@@ -129,7 +129,7 @@ export function useBuiltInBankSyncProviders({
   const { configuredAkahu } = useAkahuStatus(akahuEnabled);
   const { configuredEnableBanking, isLoading: isEnableBankingLoading } =
     useEnableBankingStatus(enableBankingEnabled);
-  const { configuredPlaid } = usePlaidStatus();
+  const { configuredPlaid, plaidEnv } = usePlaidStatus();
 
   useEffect(() => {
     setIsGoCardlessSetupComplete(configuredGoCardless);
@@ -227,11 +227,13 @@ export function useBuiltInBankSyncProviders({
           name: 'plaid-init',
           options: {
             onSuccess: () => setIsPlaidSetupComplete(true),
+            configured: configuredPlaid,
+            env: plaidEnv,
           },
         },
       }),
     );
-  }, [dispatch]);
+  }, [dispatch, configuredPlaid, plaidEnv]);
 
   const notifyResetFailure = useCallback(
     (providerName: string, error: unknown) => {

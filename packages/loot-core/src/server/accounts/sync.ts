@@ -391,6 +391,41 @@ async function downloadEnableBankingTransactions(
   };
 }
 
+async function downloadPlaidTransactions(
+  acctId: string,
+  itemId: string,
+  since: string,
+) {
+  const userToken = await asyncStorage.getItem('user-token');
+  if (!userToken) return;
+
+  logger.log('Pulling transactions from Plaid');
+
+  const res = await post(
+    getServer().PLAID_SERVER + '/get-transactions',
+    {
+      itemId,
+      accountId: acctId,
+    },
+    {
+      'X-ACTUAL-TOKEN': userToken,
+    },
+    60000,
+  );
+
+  if (res.error_code) {
+    throw BankSyncError(res.error_type, res.error_code);
+  }
+
+  const { transactions, accountBalance, startingBalance } = res.data || res;
+
+  return {
+    transactions,
+    accountBalance,
+    startingBalance,
+  };
+}
+
 async function resolvePayee(trans, payeeName, payeesToCreate) {
   if (trans.payee == null && payeeName) {
     // First check our registry of new payees (to avoid a db access)
@@ -1095,6 +1130,13 @@ async function processBankSyncDownload(
         currentBalance,
       );
       balanceToUse = Math.round(previousBalance);
+    } else if (acctRow.account_sync_source === 'plaid') {
+      // For Plaid, amounts are already normalized in sync-server
+      // Calculate previous balance by reversing transactions
+      const previousBalance = transactions.reduce((total, trans) => {
+        return total - amountToInteger(trans.transactionAmount.amount);
+      }, currentBalance);
+      balanceToUse = previousBalance;
     }
 
     const oldestTransaction = transactions[transactions.length - 1];
@@ -1196,6 +1238,8 @@ export async function syncAccount(
     );
   } else if (acctRow.account_sync_source === 'enableBanking') {
     download = await downloadEnableBankingTransactions(acctId, syncStartDate);
+  } else if (acctRow.account_sync_source === 'plaid') {
+    download = await downloadPlaidTransactions(acctId, bankId, syncStartDate);
   } else {
     throw new Error(
       `Unrecognized bank-sync provider: ${acctRow.account_sync_source}`,

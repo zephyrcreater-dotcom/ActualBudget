@@ -31,7 +31,7 @@ Plaid is integrated as a bank sync provider alongside other providers like GoCar
 
 **Method**: POST
 
-Check if Plaid is configured.
+Check if Plaid is configured and get current environment.
 
 **Response**:
 
@@ -39,7 +39,63 @@ Check if Plaid is configured.
 {
   "status": "ok",
   "data": {
-    "configured": true
+    "configured": true,
+    "env": "sandbox",
+    "clientIdMasked": "pk_t...345"
+  }
+}
+```
+
+### `/save-credentials`
+
+**Method**: POST
+
+Store Plaid credentials (Client ID, Secret, Environment). This endpoint allows users to configure Plaid from the app UI without requiring environment variables.
+
+**Request**:
+
+```json
+{
+  "client_id": "pk_live_...",
+  "secret": "your_secret_key",
+  "env": "sandbox"
+}
+```
+
+**Response**:
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "message": "Plaid credentials saved successfully",
+    "configured": true,
+    "env": "sandbox"
+  }
+}
+```
+
+**Security Notes**:
+
+- Credentials are stored in the `secrets` table, never in the budget database
+- The secret is never returned in responses
+- Client ID is masked (first 4 + last 4 characters) if returned
+- All errors are logged but sensitive values are redacted
+
+### `/clear-credentials`
+
+**Method**: POST
+
+Clear all stored Plaid credentials. This securely removes the Client ID, Secret, and Environment configuration.
+
+**Response**:
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "message": "Plaid credentials cleared successfully",
+    "configured": false
   }
 }
 ```
@@ -184,20 +240,38 @@ Trigger a transaction sync for a Plaid item (placeholder for full implementation
 - [x] Comprehensive endpoint tests with security validation
 - [x] All access tokens properly scoped to server-side only (never returned to client)
 
-### Transaction Sync Placeholder (Ready for Phase 3)
+### Phase 3: Desktop-client UI for Plaid Setup (Complete)
 
-- [x] Safe placeholder implementation that calls Plaid transactionsSync
-- [x] Cursor-based pagination support (not yet wired)
-- [x] Error handling for failed syncs
+- [x] Credential entry form in PlaidInitModal
+- [x] Environment dropdown (sandbox/development/production)
+- [x] Form validation and security warnings
+- [x] Edit and Clear credential buttons
+- [x] Responsive UI for configured/not-configured states
+- [x] Integration with sync-server credential endpoints
+
+### Phase 4: Transaction Sync Implementation (Complete)
+
+- [x] Plaid transactionsSync API integration
+- [x] Cursor-based pagination support
+- [x] Amount sign mapping (Plaid → Actual convention)
+- [x] Pending and booked transaction handling
+- [x] Error handling and status mapping
+
+### Phase 5: In-App Credential Setup (Complete)
+
+- [x] `/save-credentials` endpoint with validation
+- [x] `/clear-credentials` endpoint
+- [x] Environment validation (sandbox/development/production)
+- [x] Security: credentials stored in secrets table, never in budget file
+- [x] Masked Client ID display
+- [x] Comprehensive tests for credential management
 
 ### Next Phases (Not Yet Implemented)
 
-- Phase 3: Desktop-client UI for Plaid setup
-- Phase 4: loot-core Plaid provider dispatch
-- Phase 5: Transaction normalization and import
-- Phase 6: Account linking and reconciliation
+- Phase 6: Full end-to-end testing with real Plaid data
+- Phase 7: Webhook handling for real-time updates (optional, polling works without it)
 - Future: Multi-user/server-hosted account scoping
-- Future: Webhook handling for real-time updates
+- Future: Transaction webhook-driven sync
 
 ## Database Schema
 

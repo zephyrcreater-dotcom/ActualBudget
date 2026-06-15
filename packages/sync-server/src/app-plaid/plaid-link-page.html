@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plaid Link</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          'Helvetica Neue', Arial, sans-serif;
+        background: #f5f5f5;
+      }
+      #status {
+        padding: 20px;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+        font-size: 13px;
+        color: #888;
+      }
+      .step.ok {
+        color: #2a6;
+      }
+      .step.fail {
+        color: #c33;
+        font-weight: 500;
+      }
+      .step::before {
+        content: '○';
+        font-size: 11px;
+      }
+      .step.ok::before {
+        content: '✓';
+        color: #2a6;
+      }
+      .step.fail::before {
+        content: '✗';
+        color: #c33;
+      }
+      #error-detail {
+        margin-top: 12px;
+        padding: 10px 14px;
+        background: #fee;
+        color: #c33;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">
+      <div class="step" id="s-token">Reading link_token from URL</div>
+      <div class="step" id="s-script">Loading Plaid SDK from CDN</div>
+      <div class="step" id="s-sdk">window.Plaid available</div>
+      <div class="step" id="s-create">Plaid.create() called</div>
+      <div class="step" id="s-open">handler.open() called — Plaid UI launching</div>
+      <div id="error-detail"></div>
+    </div>
+
+    <script>
+      // Catch CSP violations early — if CDN is blocked by CSP this fires before onerror
+      document.addEventListener('securitypolicyviolation', function (e) {
+        var msg =
+          'CSP violation: ' +
+          e.violatedDirective +
+          ' blocked ' +
+          e.blockedURI +
+          (e.disposition === 'enforce' ? ' (enforced)' : ' (report-only)');
+        console.error('[Plaid Link Page] ' + msg);
+        fail('s-script', msg);
+      });
+
+      function ok(id) {
+        var el = document.getElementById(id);
+        if (el) el.className = 'step ok';
+      }
+      function fail(id, detail) {
+        var el = document.getElementById(id);
+        if (el) el.className = 'step fail';
+        if (detail) {
+          var ed = document.getElementById('error-detail');
+          ed.style.display = 'block';
+          ed.textContent = detail;
+        }
+        console.error('[Plaid Link Page] FAIL at ' + id + ':', detail || '');
+      }
+
+      // Step 1: read link_token + app_origin from URL; persist both for Plaid OAuth reloads
+      // (Plaid's OAuth redirect strips query params, so we save to sessionStorage)
+      var params = new URLSearchParams(window.location.search);
+      var linkToken = params.get('link_token');
+      var appOrigin = params.get('app_origin');
+
+      if (linkToken) {
+        sessionStorage.setItem('plaid_link_token', linkToken);
+      } else {
+        linkToken = sessionStorage.getItem('plaid_link_token');
+      }
+
+      // app_origin is the main app window's origin (may differ from popup's origin in dev)
+      if (appOrigin) {
+        sessionStorage.setItem('plaid_app_origin', appOrigin);
+      } else {
+        appOrigin = sessionStorage.getItem('plaid_app_origin') || window.location.origin;
+      }
+      if (!linkToken) {
+        fail('s-token', 'Missing link_token query parameter');
+      } else {
+        ok('s-token');
+        console.log('[Plaid Link Page] link_token found (first 20 chars):', linkToken.substring(0, 20));
+
+        // Step 2: load the Plaid SDK dynamically so we can detect load errors
+        var script = document.createElement('script');
+        script.src = 'https://cdn.plaid.com/link/v3/stable/link-initialize.js';
+
+        script.onload = function () {
+          ok('s-script');
+          console.log('[Plaid Link Page] Plaid SDK script loaded');
+
+          // Step 3: verify window.Plaid exists
+          if (typeof window.Plaid === 'undefined') {
+            fail('s-sdk', 'window.Plaid is undefined after script load');
+            return;
+          }
+          ok('s-sdk');
+          console.log('[Plaid Link Page] window.Plaid is available');
+
+          // Step 4: create handler
+          var handler;
+          try {
+            handler = window.Plaid.create({
+              token: linkToken,
+              onSuccess: function (publicToken, metadata) {
+                console.log('[Plaid Link Page] onSuccess called');
+                if (window.opener) {
+                  window.opener.postMessage(
+                    { type: 'plaid-link-success', publicToken: publicToken, metadata: metadata },
+                    appOrigin,
+                  );
+                }
+                window.close();
+              },
+              onExit: function (err, metadata) {
+                console.log('[Plaid Link Page] onExit called, err:', err, 'metadata:', metadata);
+                if (err) {
+                  // Display inline so CSP/iframe failures are visible in the popup
+                  var errMsg =
+                    (err.display_message || err.error_message || err.error_type) ||
+                    JSON.stringify(err);
+                  fail(
+                    's-open',
+                    'Plaid onExit error: ' + errMsg + '\n\nmetadata: ' + JSON.stringify(metadata, null, 2),
+                  );
+                  if (window.opener) {
+                    window.opener.postMessage(
+                      {
+                        type: 'plaid-link-error',
+                        error: errMsg,
+                        metadata: metadata,
+                      },
+                      appOrigin,
+                    );
+                  }
+                } else {
+                  if (window.opener) {
+                    window.opener.postMessage(
+                      { type: 'plaid-link-exit', metadata: metadata },
+                      appOrigin,
+                    );
+                  }
+                  window.close();
+                }
+              },
+              onEvent: function (eventName, metadata) {
+                console.log('[Plaid Link Page] onEvent:', eventName, metadata);
+              },
+            });
+          } catch (e) {
+            fail('s-create', 'Plaid.create() threw: ' + String(e));
+            return;
+          }
+          ok('s-create');
+
+          // Step 5: open
+          try {
+            handler.open();
+          } catch (e) {
+            fail('s-open', 'handler.open() threw: ' + String(e));
+            return;
+          }
+          ok('s-open');
+          console.log('[Plaid Link Page] handler.open() called');
+        };
+
+        script.onerror = function (e) {
+          // Check which headers this page was served with to help diagnose the failure
+          var coep = document.documentElement.getAttribute('data-coep') || '(unknown)';
+          var hint =
+            'Script failed to load from https://cdn.plaid.com/link/v3/stable/link-initialize.js\n\n' +
+            'Possible causes:\n' +
+            '1. Network: cdn.plaid.com unreachable from this browser/network\n' +
+            '2. CSP: script-src does not allow https://cdn.plaid.com\n' +
+            '3. COEP: if this page has Cross-Origin-Embedder-Policy: require-corp, the CDN\n' +
+            '   script is blocked because cdn.plaid.com does not send CORP headers\n\n' +
+            'Check the browser console (F12) for the specific blocking message.\n' +
+            'Also check Network tab: inspect /plaid/link response headers for COEP/CSP.';
+          fail('s-script', hint);
+          console.error('[Plaid Link Page] script onerror event:', e);
+        };
+
+        document.head.appendChild(script);
+      }
+    </script>
+  </body>
+</html>

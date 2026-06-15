@@ -34,6 +34,49 @@ type ExchangePublicTokenRequest = {
   institutionName?: string;
 };
 
+type PlaidTransactionResponse = {
+  transactions: Array<{
+    transaction_id: string;
+    account_id: string;
+    date: string;
+    authorized_date?: string;
+    name: string;
+    amount: number;
+    iso_currency_code?: string;
+    unofficial_currency_code?: string;
+    transaction_code?: string;
+    transaction_type?: string;
+    pending: boolean;
+    pending_transaction_id?: string;
+    categories?: string[];
+    category_id?: string;
+    counterparties?: Array<{
+      name?: string;
+    }>;
+    merchant_name?: string;
+  }>;
+  item: {
+    item_id: string;
+  };
+  cursor: string;
+  has_more: boolean;
+};
+
+type NormalizedPlaidTransaction = {
+  transactionId: string;
+  amount: string;
+  transactionAmount: {
+    amount: string;
+    currency: string;
+  };
+  payeeName: string;
+  date: string;
+  bookingDate?: string;
+  booked: boolean;
+  account: string;
+  imported_id?: string;
+};
+
 class PlaidServiceImpl {
   private client: PlaidApi | null = null;
 
@@ -261,8 +304,148 @@ class PlaidServiceImpl {
   }
 
   /**
-   * Sync transactions from Plaid for an item or specific account
-   * Placeholder for full transaction sync implementation
+   * Fetch and normalize transactions from Plaid
+   * Returns transactions in Actual's expected format for import/matching
+   */
+  async getTransactions(
+    itemId: string,
+    accountId?: string,
+  ): Promise<{
+    transactions: NormalizedPlaidTransaction[];
+    accountBalance: Array<{
+      balanceType: string;
+      balanceAmount: {
+        amount: string;
+        currency: string;
+      };
+    }>;
+    startingBalance: number;
+  }> {
+    debug(
+      `Fetching Plaid transactions for item: ${itemId}, account: ${accountId}`,
+    );
+
+    const db = getAccountDb();
+
+    // Verify the item exists and get the access token
+    const item = db.first(
+      `SELECT item_id, access_token, last_cursor FROM plaid_items WHERE item_id = ?`,
+      [itemId],
+    ) as {
+      item_id: string;
+      access_token: string;
+      last_cursor?: string;
+    } | null;
+
+    if (!item) {
+      throw new Error(`Plaid item not found: ${itemId}`);
+    }
+
+    try {
+      const client = this.initializeClient();
+      const allTransactions: NormalizedPlaidTransaction[] = [];
+      let cursor = item.last_cursor || undefined;
+      let hasMore = true;
+
+      // Fetch all transactions using cursor-based pagination
+      while (hasMore) {
+        const response = (await client.transactionsSync({
+          access_token: item.access_token,
+          cursor,
+          options: {
+            include_personal_finance_category: false,
+          },
+        })) as any;
+
+        const plaidTransactions = response.data.transactions as any[];
+
+        debug(
+          `Fetched ${plaidTransactions.length} transactions from Plaid for item ${itemId}`,
+        );
+
+        // Normalize Plaid transactions to Actual format
+        for (const transaction of plaidTransactions) {
+          // Skip transactions that don't match the requested account (if specified)
+          if (accountId && transaction.account_id !== accountId) {
+            continue;
+          }
+
+          // Handle removed transactions (transaction_id in removed array)
+          if (
+            transaction.transaction_type === 'TRANSFER' &&
+            transaction.removed
+          ) {
+            continue;
+          }
+
+          const normalized = this.normalizePlaidTransaction(transaction);
+          allTransactions.push(normalized);
+        }
+
+        cursor = response.data.cursor;
+        hasMore = response.data.has_more;
+      }
+
+      // Update cursor for next sync
+      db.mutate(`UPDATE plaid_items SET last_cursor = ? WHERE item_id = ?`, [
+        cursor,
+        itemId,
+      ]);
+
+      debug(`Successfully fetched ${allTransactions.length} transactions`);
+
+      // Return in format expected by loot-core
+      return {
+        transactions: allTransactions,
+        accountBalance: [],
+        startingBalance: 0,
+      };
+    } catch (error) {
+      const err = error as any;
+      debug(
+        `Failed to fetch transactions: ${err?.response?.data?.error_message || err?.message || String(error)}`,
+      );
+      throw new Error(
+        `Failed to fetch transactions: ${err?.response?.data?.error_message || err?.message || 'Unknown error'}`,
+      );
+    }
+  }
+
+  /**
+   * Normalize a Plaid transaction to Actual's expected format
+   * Handles Plaid's sign convention where positive amount = money out
+   */
+  private normalizePlaidTransaction(
+    plaidTrans: any,
+  ): NormalizedPlaidTransaction {
+    // Plaid convention: positive amount = debit (money out), negative = credit (money in)
+    // Actual convention: positive amount = deposit (money in), negative = withdrawal (money out)
+    // So we need to negate the amount
+    const actualAmount = -plaidTrans.amount;
+
+    return {
+      transactionId: plaidTrans.transaction_id,
+      amount: String(actualAmount),
+      transactionAmount: {
+        amount: String(actualAmount),
+        currency: plaidTrans.iso_currency_code || 'USD',
+      },
+      payeeName:
+        plaidTrans.merchant_name ||
+        plaidTrans.name ||
+        plaidTrans.counterparties?.[0]?.name ||
+        'Unknown',
+      date: plaidTrans.date,
+      bookingDate: plaidTrans.date,
+      booked: !plaidTrans.pending,
+      account: plaidTrans.account_id,
+      imported_id: plaidTrans.transaction_id,
+    };
+  }
+
+  /**
+   * Sync transactions from Plaid for an item
+   * Fetches transactions and updates sync status
    */
   async syncTransactions(
     itemId: string,
@@ -274,27 +457,13 @@ class PlaidServiceImpl {
 
     const db = getAccountDb();
 
-    // Verify the item exists
-    const item = db.first(
-      `SELECT item_id, access_token FROM plaid_items WHERE item_id = ?`,
-      [itemId],
-    ) as { item_id: string; access_token: string } | null;
-
-    if (!item) {
-      throw new Error(`Plaid item not found: ${itemId}`);
-    }
-
     try {
-      // Placeholder implementation
-      // In production, this would:
-      // 1. Call Plaid's transactionsSync API (using cursor if available)
-      // 2. Parse and normalize transactions to Actual format
-      // 3. Return transactions for loot-core to handle import/matching/reconciliation
-      // 4. Update last_cursor and last_successful_sync timestamps
+      // Fetch transactions
+      await this.getTransactions(itemId, accountId);
 
-      // For now, just mark the sync as successful
+      // Update successful sync timestamp
       db.mutate(
-        `UPDATE plaid_items SET last_successful_sync = CURRENT_TIMESTAMP WHERE item_id = ?`,
+        `UPDATE plaid_items SET last_successful_sync = CURRENT_TIMESTAMP, status = 'active' WHERE item_id = ?`,
         [itemId],
       );
 
@@ -302,15 +471,21 @@ class PlaidServiceImpl {
 
       return {
         synced: true,
-        message:
-          'Plaid transaction sync placeholder. Ready for loot-core integration.',
+        message: 'Plaid transactions synced successfully',
       };
     } catch (error) {
       const err = error as any;
-      debug(`Failed to sync transactions: ${err?.message || String(error)}`);
-      throw new Error(
-        `Failed to sync transactions: ${err?.message || 'Unknown error'}`,
+      const errorMsg =
+        err?.response?.data?.error_message || err?.message || String(error);
+      debug(`Failed to sync transactions: ${errorMsg}`);
+
+      // Update error status
+      db.mutate(
+        `UPDATE plaid_items SET status = 'failed', last_error_code = ? WHERE item_id = ?`,
+        [err?.response?.data?.error_code || 'UNKNOWN', itemId],
       );
+
+      throw new Error(`Failed to sync transactions: ${errorMsg}`);
     }
   }
 

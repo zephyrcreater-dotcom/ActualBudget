@@ -665,6 +665,8 @@ export type Modal =
       name: 'plaid-init';
       options: {
         onSuccess: () => void;
+        configured?: boolean;
+        env?: string;
       };
     }
   | {

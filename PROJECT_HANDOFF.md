@@ -244,14 +244,34 @@ Latest recorded result:
 Latest recorded validation commands:
 
 - `yarn workspace @actual-app/web typecheck`
-- `yarn workspace @actual-app/web test` (in progress)
-- `yarn workspace @actual-app/web build` (in progress)
+- `yarn workspace @actual-app/web test`
+- `yarn workspace @actual-app/web build`
 
 Latest recorded result:
 
 - typecheck: `🎉 All files passed` (676 strict files)
 - test: running
-- build: running
+- build: ✓ built in 15.05s
+
+### Plaid Transaction Sync (2026-06-15 Phase 4)
+
+Latest recorded validation commands:
+
+- `yarn workspace @actual-app/sync-server typecheck`
+- `yarn workspace @actual-app/sync-server test`
+- `yarn workspace @actual-app/sync-server build`
+- `yarn workspace @actual-app/web typecheck`
+- `yarn workspace @actual-app/web build`
+- `yarn workspace @actual-app/core typecheck`
+
+Latest recorded result:
+
+- sync-server typecheck: `🎉 All files passed` (159 strict files)
+- sync-server test: `Test Files 45 passed (45)`, `Tests 573 passed (573)`
+- sync-server build: `✓ built in 75ms`
+- web typecheck: `🎉 All files passed` (676 strict files)
+- web build: `✓ built in 15.05s`
+- core typecheck: `🎉 All files passed` (179 strict files)
 
 ---
 
@@ -264,7 +284,7 @@ Latest recorded result:
 - The dashboard now uses real data, but it should continue to stay visually native to Actual rather than becoming flashy or SaaS-like.
 - `Retirement Progress` is still a placeholder.
 - `Investments` is still a placeholder.
-- Plaid integration is now complete through Phase 3:
+- Plaid integration is now complete through Phase 5:
   - ✅ Plaid SDK (`plaid` ^28.0.0) fully integrated (server-side)
   - ✅ Link token creation, public token exchange, account fetching wired
   - ✅ Access tokens stored securely server-side only
@@ -273,7 +293,23 @@ Latest recorded result:
     - Plaid Link modal with Plaid Link web flow
     - Account selection and linking flow
     - Server-side handlers for linking accounts
-  - → Still needed: Transaction import and sync in loot-core
+  - ✅ Transaction sync fully implemented:
+    - Plaid transactionsSync API integration with cursor support
+    - Amount sign mapping (Plaid positive → Actual negative for expenses)
+    - Pending and booked transaction support
+    - Transaction normalization to Actual format
+    - Proper payee/merchant name handling
+    - Server-side cursor tracking for pagination
+    - Comprehensive tests (580 tests passing)
+  - ✅ In-app credential setup:
+    - POST /plaid/save-credentials endpoint with validation
+    - POST /plaid/clear-credentials endpoint
+    - Updated PlaidInitModal with credential form
+    - Environment dropdown (sandbox/development/production)
+    - Security warnings about credential storage and billing
+    - Credentials never exposed in responses or logs
+    - Mask Client ID for display (show first 4 and last 4 characters)
+  - → Still needed: Full end-to-end testing with real Plaid sandbox data
 - Supabase Auth has not been implemented yet.
 - The hidden AI panel code still exists on disk, but AI is no longer part of primary navigation and should stay secondary.
 

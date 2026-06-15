@@ -52,6 +52,40 @@ vi.mock('plaid', () => ({
         },
       };
     }
+
+    async transactionsSync(options: any) {
+      return {
+        data: {
+          transactions: [
+            {
+              transaction_id: 'txn_test_123',
+              account_id: options.access_token ? 'account_test_123' : null,
+              date: '2026-06-15',
+              name: 'Amazon',
+              amount: 50.0,
+              iso_currency_code: 'USD',
+              merchant_name: 'Amazon',
+              pending: false,
+            },
+            {
+              transaction_id: 'txn_test_124',
+              account_id: options.access_token ? 'account_test_123' : null,
+              date: '2026-06-14',
+              name: 'Pending Charge',
+              amount: 25.5,
+              iso_currency_code: 'USD',
+              merchant_name: 'Coffee Shop',
+              pending: true,
+            },
+          ],
+          cursor: 'cursor_next_page_123',
+          has_more: false,
+          item: {
+            item_id: 'item_test_123',
+          },
+        },
+      };
+    }
   },
   PlaidEnvironments: {
     Sandbox: 'https://sandbox.plaid.com',
@@ -222,6 +256,29 @@ describe('PlaidService', () => {
     });
   });
 
+  describe('getTransactions', () => {
+    beforeEach(() => {
+      vi.spyOn(secretsService, 'get').mockImplementation((name: string) => {
+        switch (name) {
+          case 'plaid_clientId':
+            return 'test_client_id';
+          case 'plaid_secret':
+            return 'test_secret';
+          case 'plaid_env':
+            return 'sandbox';
+          default:
+            return null;
+        }
+      });
+    });
+
+    it('throws error when item does not exist', async () => {
+      await expect(
+        plaidService.getTransactions('nonexistent_item_id'),
+      ).rejects.toThrow('Plaid item not found');
+    });
+  });
+
   describe('syncTransactions', () => {
     beforeEach(() => {
       vi.spyOn(secretsService, 'get').mockImplementation((name: string) => {
@@ -242,6 +299,90 @@ describe('PlaidService', () => {
       await expect(
         plaidService.syncTransactions('nonexistent_item_id'),
       ).rejects.toThrow('Plaid item not found');
+    });
+  });
+
+  describe('normalizePlaidTransaction', () => {
+    it('correctly negates amount (Plaid positive = money out)', () => {
+      // Plaid: positive amount means money leaving account (debit)
+      // Actual: negative amount means money leaving (withdrawal)
+      // So Plaid 50.00 should become -50.00 in Actual
+      const plaidTrans = {
+        transaction_id: 'txn_123',
+        account_id: 'acct_123',
+        date: '2026-06-15',
+        name: 'Gas Station',
+        amount: 50.0,
+        iso_currency_code: 'USD',
+        merchant_name: 'Shell Gas',
+        pending: false,
+      };
+
+      // Access private method through any cast
+      const result = (plaidService as any).normalizePlaidTransaction(
+        plaidTrans,
+      );
+
+      expect(result.amount).toBe('-50');
+      expect(result.transactionAmount.amount).toBe('-50');
+      expect(result.booked).toBe(true);
+    });
+
+    it('handles pending transactions correctly', () => {
+      const plaidTrans = {
+        transaction_id: 'txn_pending_123',
+        account_id: 'acct_123',
+        date: '2026-06-14',
+        name: 'Coffee',
+        amount: 5.5,
+        iso_currency_code: 'USD',
+        merchant_name: 'Starbucks',
+        pending: true,
+      };
+
+      const result = (plaidService as any).normalizePlaidTransaction(
+        plaidTrans,
+      );
+
+      expect(result.booked).toBe(false);
+      expect(result.amount).toBe('-5.5');
+    });
+
+    it('uses merchant name as payee when available', () => {
+      const plaidTrans = {
+        transaction_id: 'txn_123',
+        account_id: 'acct_123',
+        date: '2026-06-15',
+        name: 'Shell Station 12345',
+        amount: 50.0,
+        iso_currency_code: 'USD',
+        merchant_name: 'Shell Oil',
+        pending: false,
+      };
+
+      const result = (plaidService as any).normalizePlaidTransaction(
+        plaidTrans,
+      );
+
+      expect(result.payeeName).toBe('Shell Oil');
+    });
+
+    it('falls back to transaction name when merchant name not available', () => {
+      const plaidTrans = {
+        transaction_id: 'txn_123',
+        account_id: 'acct_123',
+        date: '2026-06-15',
+        name: 'Unknown Merchant',
+        amount: 50.0,
+        iso_currency_code: 'USD',
+        pending: false,
+      };
+
+      const result = (plaidService as any).normalizePlaidTransaction(
+        plaidTrans,
+      );
+
+      expect(result.payeeName).toBe('Unknown Merchant');
     });
   });
 

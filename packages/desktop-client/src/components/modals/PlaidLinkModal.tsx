@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
-import { ButtonWithLoading } from '@actual-app/components/button';
 import { Paragraph } from '@actual-app/components/paragraph';
 import type { SyncServerPlaidAccount } from '@actual-app/core/types/models/plaid';
 
@@ -26,9 +25,11 @@ export function PlaidLinkModal({ onSuccess, onClose }: PlaidLinkProps) {
   const serverURL = useServerURL();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [popupWindow, setPopupWindow] = useState<Window | null>(null);
 
   useEffect(() => {
     let isMounted = true;
+    let popup: Window | null = null;
 
     async function initiatePlaidLink() {
       try {
@@ -43,75 +44,126 @@ export function PlaidLinkModal({ onSuccess, onClose }: PlaidLinkProps) {
         setIsLoading(true);
         setError(null);
 
-        // Get a unique user ID (use timestamp for now)
+        // Get a unique user ID
         const userId = `user_${Date.now()}`;
+        console.log('[Plaid] Creating link token with userId:', userId);
 
         // Create link token
-        const linkToken = await createLinkToken(serverURL, userId);
+        let linkToken: string;
+        try {
+          linkToken = await createLinkToken(serverURL, userId);
+          console.log('[Plaid] Successfully created link token');
+        } catch (err) {
+          console.error('[Plaid] Failed to create link token:', err);
+          throw err;
+        }
 
-        // Load Plaid Link script
-        const script = document.createElement('script');
-        script.src = 'https://cdn.plaid.com/link/v3/stable/link-initialize.js';
-        script.onload = () => {
-          if (!isMounted) return;
+        // Set up postMessage listener BEFORE opening popup
+        const handleMessage = async (event: MessageEvent) => {
+          // Validate origin - accept same origin or localhost
+          const popupOrigin = new URL(serverURL).origin;
+          if (
+            event.origin !== window.location.origin &&
+            event.origin !== popupOrigin
+          ) {
+            console.warn(
+              '[Plaid] Received message from untrusted origin:',
+              event.origin,
+            );
+            return;
+          }
 
-          // Initialize Plaid Link
-          if (typeof window !== 'undefined' && (window as any).Plaid) {
-            const handler = (window as any).Plaid.create({
-              token: linkToken,
-              onSuccess: async (public_token: string) => {
-                try {
-                  // Exchange public token for access token
-                  const tokenData = await exchangePublicToken(
-                    serverURL,
-                    public_token,
-                  );
+          console.log('[Plaid] Received message:', event.data.type);
 
-                  // Get Plaid accounts for this item
-                  const accounts = await getPlaidAccounts(
-                    serverURL,
-                    tokenData.itemId,
-                  );
+          if (event.data.type === 'plaid-link-success') {
+            console.log('[Plaid] User completed Plaid Link flow');
+            try {
+              const publicToken = event.data.publicToken;
 
-                  // Call success handler
-                  await onSuccess({
-                    accounts,
-                    itemId: tokenData.itemId,
-                    institutionId: tokenData.institutionId,
-                    institutionName: tokenData.institutionName,
-                  });
+              // Exchange public token for access token
+              const tokenData = await exchangePublicToken(
+                serverURL,
+                publicToken,
+              );
 
-                  // Close modal
-                  dispatch(popModal());
-                } catch (err) {
-                  if (isMounted) {
-                    setError(
-                      err instanceof Error
-                        ? err.message
-                        : t('Failed to process Plaid connection'),
-                    );
-                  }
-                }
-              },
-              onExit: () => {
-                if (onClose) {
-                  onClose();
-                }
-              },
-            });
+              // Get Plaid accounts for this item
+              const accounts = await getPlaidAccounts(
+                serverURL,
+                tokenData.itemId,
+              );
 
-            handler.open();
+              // Call success handler
+              await onSuccess({
+                accounts,
+                itemId: tokenData.itemId,
+                institutionId: tokenData.institutionId,
+                institutionName: tokenData.institutionName,
+              });
+
+              // Close modal
+              if (isMounted) {
+                dispatch(popModal());
+              }
+            } catch (err) {
+              console.error('[Plaid] Error processing Plaid connection:', err);
+              if (isMounted) {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : t('Failed to process Plaid connection'),
+                );
+              }
+            }
+          } else if (event.data.type === 'plaid-link-error') {
+            console.error('[Plaid] Error in Plaid Link:', event.data.error);
+            if (isMounted) {
+              setError(event.data.error || t('Plaid Link error'));
+            }
+          } else if (event.data.type === 'plaid-link-exit') {
+            console.log('[Plaid] User exited Plaid Link');
+            if (onClose && isMounted) {
+              onClose();
+            }
           }
         };
 
-        script.onerror = () => {
-          if (isMounted) {
-            setError(t('Failed to load Plaid Link'));
-            setIsLoading(false);
+        window.addEventListener('message', handleMessage);
+
+        // Open Plaid Link in a popup window.
+        // app_origin is passed so the popup can target postMessage to the correct
+        // origin — the main app and sync-server may be on different ports in dev.
+        const plaidLinkUrl =
+          `${serverURL}/plaid/link` +
+          `?link_token=${encodeURIComponent(linkToken)}` +
+          `&app_origin=${encodeURIComponent(window.location.origin)}`;
+        console.log(
+          '[Plaid] Opening popup with URL:',
+          plaidLinkUrl.replace(linkToken, '[TOKEN]'),
+        );
+
+        popup = window.open(
+          plaidLinkUrl,
+          'PlaidLink',
+          'width=500,height=700,left=100,top=100',
+        );
+
+        if (!popup) {
+          throw new Error(
+            t('Failed to open Plaid Link popup. Check popup blocker.'),
+          );
+        }
+
+        if (isMounted) {
+          setPopupWindow(popup);
+          setIsLoading(false);
+        }
+
+        return () => {
+          window.removeEventListener('message', handleMessage);
+          if (popup && !popup.closed) {
+            popup.close();
           }
         };
-
-        document.body.appendChild(script);
       } catch (err) {
         if (isMounted) {
           setError(
@@ -128,10 +180,16 @@ export function PlaidLinkModal({ onSuccess, onClose }: PlaidLinkProps) {
 
     return () => {
       isMounted = false;
+      if (popup && !popup.closed) {
+        popup.close();
+      }
     };
   }, [dispatch, onClose, onSuccess, serverURL, t]);
 
   function handleClose() {
+    if (popupWindow && !popupWindow.closed) {
+      popupWindow.close();
+    }
     if (onClose) {
       onClose();
     }
@@ -150,7 +208,7 @@ export function PlaidLinkModal({ onSuccess, onClose }: PlaidLinkProps) {
           }}
         >
           <Paragraph>
-            <Trans>Initializing Plaid Link...</Trans>
+            <Trans>Opening Plaid Link...</Trans>
           </Paragraph>
         </div>
       ) : error ? (
@@ -159,7 +217,20 @@ export function PlaidLinkModal({ onSuccess, onClose }: PlaidLinkProps) {
             <Trans>{error}</Trans>
           </ErrorAlert>
         </div>
-      ) : null}
+      ) : (
+        <div
+          style={{
+            padding: '20px',
+          }}
+        >
+          <Paragraph>
+            <Trans>
+              A Plaid Link window has been opened. Complete the linking process
+              in the popup window.
+            </Trans>
+          </Paragraph>
+        </div>
+      )}
 
       {!isLoading && (
         <ModalButtons>

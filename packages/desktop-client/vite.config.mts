@@ -304,6 +304,22 @@ export default defineConfig(async ({ mode, command }) => {
 
   const browserOpen = env.BROWSER_OPEN ? `//${env.BROWSER_OPEN}` : true;
 
+  // CSP headers for dev server
+  const cspDevHeaders = {
+    scriptSrc: "'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.plaid.com",
+    connectSrc:
+      "'self' ws: wss: http: https: https://production.plaid.com https://sandbox.plaid.com https://development.plaid.com",
+  };
+  const devCsp = [
+    "default-src 'self' blob:",
+    "img-src 'self' blob: data:",
+    `script-src ${cspDevHeaders.scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    `connect-src ${cspDevHeaders.connectSrc}`,
+    "frame-src 'self' https://cdn.plaid.com",
+  ].join('; ');
+
   return {
     base: '/',
     envPrefix: 'REACT_APP_',
@@ -343,7 +359,10 @@ export default defineConfig(async ({ mode, command }) => {
     },
     server: {
       host: true,
-      headers: devHeaders,
+      headers: {
+        ...devHeaders,
+        'Content-Security-Policy': devCsp,
+      },
       port: +env.PORT || 5173,
       open: env.BROWSER
         ? ['chrome', 'firefox', 'edge', 'browser', 'browserPrivate'].includes(

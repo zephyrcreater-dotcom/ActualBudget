@@ -1,3 +1,4 @@
+import * as asyncStorage from '@actual-app/core/platform/server/asyncStorage';
 import type { AccountEntity } from '@actual-app/core/types/models';
 import type { SyncServerPlaidAccount } from '@actual-app/core/types/models/plaid';
 import { t } from 'i18next';
@@ -38,13 +39,19 @@ export async function callSyncServer(
     throw new Error(t('Sync server not configured'));
   }
 
+  // Get the session token for sync server authentication
+  const userToken = await asyncStorage.getItem('user-token');
+  if (!userToken) {
+    throw new Error(t('Not authenticated with sync server'));
+  }
+
   const response = await fetch(`${serverURL}/plaid${endpoint}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     credentials: 'include',
-    body: body ? JSON.stringify(body) : undefined,
+    body: JSON.stringify({ token: userToken, ...body }),
   });
 
   const data = await response.json();
@@ -151,4 +158,36 @@ export async function getPlaidAccounts(
   })) as PlaidAccountsResponse;
 
   return resp.data.accounts || [];
+}
+
+export async function savePlaidCredentials(
+  serverURL: string,
+  clientId: string,
+  secret: string,
+  env: 'sandbox' | 'development' | 'production',
+): Promise<{
+  message: string;
+  configured: boolean;
+  env: string;
+}> {
+  const resp = (await callSyncServer(serverURL, '/save-credentials', {
+    client_id: clientId,
+    secret,
+    env,
+  })) as any;
+
+  return resp.data;
+}
+
+export async function clearPlaidCredentials(serverURL: string): Promise<{
+  message: string;
+  configured: boolean;
+}> {
+  const resp = (await callSyncServer(
+    serverURL,
+    '/clear-credentials',
+    {},
+  )) as any;
+
+  return resp.data;
 }

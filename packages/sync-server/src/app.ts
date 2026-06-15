@@ -57,6 +57,57 @@ app.use(
   }),
 );
 
+// Security headers must be applied BEFORE route handlers so that the response
+// object already carries the correct headers when the route handler calls
+// res.send(). Middleware registered after a route handler is never reached for
+// that route.
+const isDev = process.env.NODE_ENV === 'development';
+const scriptSrc = isDev
+  ? "'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.plaid.com"
+  : "'self' 'unsafe-eval' blob: https://cdn.plaid.com";
+const connectSrc = isDev
+  ? "'self' ws: wss: http: https: https://production.plaid.com https://sandbox.plaid.com https://development.plaid.com"
+  : "'self' http: https: https://production.plaid.com https://sandbox.plaid.com https://development.plaid.com";
+const csp = [
+  "default-src 'self' blob:",
+  "img-src 'self' blob: data:",
+  `script-src ${scriptSrc}`,
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  `connect-src ${connectSrc}`,
+  "frame-src 'self' https://cdn.plaid.com",
+].join('; ');
+
+// Popup-only CSP: allows Plaid CDN + *.plaid.com subdomains; no COEP/COOP so
+// the Plaid Link SDK (which doesn't send CORP headers) can load from the CDN.
+const plaidPopupCsp = [
+  "default-src 'self'",
+  "img-src 'self' data: https://*.plaid.com",
+  "script-src 'self' 'unsafe-inline' https://cdn.plaid.com",
+  "style-src 'self' 'unsafe-inline' https://cdn.plaid.com",
+  "connect-src 'self' https://*.plaid.com",
+  "frame-src 'self' https://cdn.plaid.com https://*.plaid.com",
+].join('; ');
+
+// Routes that serve the Plaid Link popup or test pages must not have COEP/COOP
+// because Plaid's CDN does not send Cross-Origin-Resource-Policy headers.
+// Any path added here must also be added to the session-skip list in app-plaid.ts.
+const PLAID_POPUP_PATHS = new Set(['/plaid/link', '/plaid/test-link-sdk']);
+
+app.use((req, res, next) => {
+  if (PLAID_POPUP_PATHS.has(req.path)) {
+    // Popup pages: strip isolation headers so Plaid CDN resources can load.
+    res.removeHeader('Cross-Origin-Opener-Policy');
+    res.removeHeader('Cross-Origin-Embedder-Policy');
+    res.set('Content-Security-Policy', plaidPopupCsp);
+  } else {
+    res.set('Cross-Origin-Opener-Policy', 'same-origin');
+    res.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    res.set('Content-Security-Policy', csp);
+  }
+  next();
+});
+
 app.use('/sync', syncApp.handlers);
 app.use('/account', accountApp.handlers);
 app.use('/gocardless', goCardlessApp.handlers);
@@ -130,31 +181,7 @@ app.get('/metrics', (_req, res) => {
   });
 });
 
-// The web frontend.
-// Dev mode proxies to Vite, which injects inline preamble scripts and uses
-// a websocket for HMR. Loosen script-src and connect-src accordingly.
-// `'unsafe-eval'` is required at runtime for the Electron app, so it is
-// kept in both branches.
-const isDev = process.env.NODE_ENV === 'development';
-const scriptSrc = isDev
-  ? "'self' 'unsafe-inline' 'unsafe-eval' blob:"
-  : "'self' 'unsafe-eval' blob:";
-const connectSrc = isDev ? "'self' ws: wss: http: https:" : 'http: https:';
-const csp = [
-  "default-src 'self' blob:",
-  "img-src 'self' blob: data:",
-  `script-src ${scriptSrc}`,
-  "style-src 'self' 'unsafe-inline'",
-  "font-src 'self' data:",
-  `connect-src ${connectSrc}`,
-].join('; ');
-
-app.use((req, res, next) => {
-  res.set('Cross-Origin-Opener-Policy', 'same-origin');
-  res.set('Cross-Origin-Embedder-Policy', 'require-corp');
-  res.set('Content-Security-Policy', csp);
-  next();
-});
+// Dev mode proxies to Vite. Prod serves the static React app.
 if (isDev) {
   console.log(
     'Running in development mode - Proxying frontend routes to React Dev Server',

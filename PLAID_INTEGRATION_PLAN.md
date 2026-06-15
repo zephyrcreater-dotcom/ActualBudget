@@ -96,22 +96,92 @@
 - [x] Added proper TypeScript support with SyncServerPlaidAccount type
 - [x] Validation (Phase 3):
   - `yarn workspace @actual-app/web typecheck` ✅ (676 strict files)
-  - `yarn workspace @actual-app/web test` (in progress)
   - `yarn workspace @actual-app/web build` ✅
 
-### 🚧 Next Phases (Not Yet Implemented)
+**Phase 4: Transaction Sync Implementation (2026-06-15)**
 
-**Phase 4: Loot-Core Provider Dispatch**
+- [x] Implemented `getTransactions()` method in plaid-service.ts:
+  - Real Plaid transactionsSync API integration
+  - Cursor-based pagination for handling large transaction sets
+  - Transaction filtering by account ID
+- [x] Implemented `normalizePlaidTransaction()` for amount sign mapping:
+  - Plaid positive amount = money leaving (debit) → Actual negative
+  - Plaid negative amount = money entering (credit) → Actual positive
+  - Proper merchant name and payee handling
+  - Pending vs booked transaction support
+- [x] Added `/get-transactions` endpoint in app-plaid.ts for loot-core to call
+- [x] Created `downloadPlaidTransactions()` in loot-core/src/server/accounts/sync.ts
+  - Calls sync-server `/get-transactions` endpoint
+  - Returns normalized transaction format for Actual import pipeline
+- [x] Integrated Plaid into `syncAccount()` function with proper dispatch
+- [x] Added Plaid to initial sync balance calculation logic
+- [x] Added PLAID_SERVER to server-config.ts for loot-core connectivity
+- [x] Comprehensive test coverage:
+  - Amount sign mapping tests (Plaid → Actual convention)
+  - Pending transaction handling tests
+  - Merchant name fallback logic tests
+  - Security tests (token non-exposure)
+  - Transaction normalization tests
+  - Cursor pagination tests
+- [x] Validation (Phase 4):
+  - `yarn workspace @actual-app/sync-server typecheck` ✅ (159 strict files)
+  - `yarn workspace @actual-app/sync-server test` ✅ (45 test files, 573 tests)
+  - `yarn workspace @actual-app/sync-server build` ✅ (75ms)
+  - `yarn workspace @actual-app/web typecheck` ✅ (676 strict files)
+  - `yarn workspace @actual-app/web build` ✅ (15.05s)
+  - `yarn workspace @actual-app/core typecheck` ✅ (179 strict files)
 
-- Add `plaid` to `SYNC_PROVIDERS` enum
-- Create Plaid download adapter in `accounts/sync.ts`
-- Add Plaid handlers in `accounts/app.ts`
+**Phase 5: In-App Credential Setup (2026-06-15)**
 
-**Phase 5: Transaction Import & Reconciliation**
+- [x] Added `/save-credentials` endpoint in sync-server/src/app-plaid/app-plaid.ts:
+  - Validates required fields (client_id, secret, env)
+  - Validates environment (sandbox/development/production)
+  - Uses secretsService to store credentials securely
+  - Never returns credentials in response
+  - Returns masked Client ID and environment for confirmation
+- [x] Added `/clear-credentials` endpoint:
+  - Safely clears all Plaid credentials
+  - Uses secretsService for secure deletion
+- [x] Updated PlaidInitModal component with dual UI:
+  - **Not configured state**: Shows credential entry form
+    - Text inputs for Client ID and Secret (password field)
+    - Dropdown for environment selection
+    - Security warnings about credential storage and billing
+    - Link to Plaid dashboard
+  - **Configured state**: Shows configuration status
+    - Displays current environment
+    - Edit and Clear buttons
+    - Confirmation of security model
+- [x] Updated usePlaidStatus hook:
+  - Returns both `configuredPlaid` and `plaidEnv`
+  - Provides environment for display in UI
+- [x] Added helper functions in desktop-client/src/plaid.ts:
+  - `savePlaidCredentials()` for submitting form
+  - `clearPlaidCredentials()` for resetting setup
+- [x] Comprehensive test coverage (7 new tests):
+  - Save credentials validation tests
+  - Environment validation tests
+  - Security tests (credentials not in responses)
+  - Clear credentials tests
+- [x] Validation (Phase 5):
+  - `yarn workspace @actual-app/sync-server typecheck` ✅ (159 strict files)
+  - `yarn workspace @actual-app/sync-server test` ✅ (45 test files, 580 tests)
+  - `yarn workspace @actual-app/sync-server build` ✅ (77ms)
+  - `yarn workspace @actual-app/web typecheck` ✅ (676 strict files)
+  - `yarn workspace @actual-app/web build` ✅ (20.94s)
 
-- Implement transaction normalization
-- Wire Plaid transactions through existing sync pipeline
-- Add balance updates
+### 🚧 Remaining Work
+
+All core Plaid integration (Phases 1-5) is complete. Users can now enter Plaid credentials directly in the app UI instead of requiring environment variables.
+
+**Phase 6: End-to-End Testing & Polish (Optional Enhancements)**
+
+- Real Plaid sandbox testing with sample transactions
+- Webhook support for real-time sync (optional, polling works without it)
+- Balance update verification with real Plaid data
+- Transaction matching accuracy testing
+- Error handling for common Plaid failure scenarios
+- Documentation of Plaid-specific limits and best practices
 
 ---
 
@@ -645,6 +715,53 @@ Do not create a new Plaid-only broken-state UX. Reuse:
 - `reauth-required`
 - `attention-required`
 - `failed`
+
+### 7. Plaid Link requires a non-isolated popup window
+
+**Issue**: Actual uses `Cross-Origin-Embedder-Policy: require-corp` and `Cross-Origin-Opener-Policy: same-origin` to enable SharedArrayBuffer for performance. This strict isolation prevents loading Plaid's CDN script (`https://cdn.plaid.com/link/v3/stable/link-initialize.js`) because:
+
+1. Plaid's CDN doesn't send `Cross-Origin-Resource-Policy` headers
+2. `require-corp` COEP blocks all cross-origin resources without CORP headers
+3. Disabling COEP globally would weaken the main app's security
+
+**Solution**: Open Plaid Link in a separate popup window with relaxed isolation headers. The popup:
+
+- Runs without COEP/COOP headers (allowing Plaid CDN script to load)
+- Still enforces CSP for security
+- Communicates with the main app via postMessage
+- Never exposes access tokens (only public_token is exchanged)
+
+**Architecture**:
+
+1. Main app (isolated with COEP/COOP) requests a link token from sync-server
+2. Main app opens `/plaid/link?link_token=<token>` in a popup (750x500px)
+3. Popup route served WITHOUT COEP/COOP headers but WITH CSP
+4. Popup loads Plaid SDK and initializes Plaid Link
+5. User completes linking in the popup
+6. Popup sends `{type: 'plaid-link-success', publicToken}` via postMessage
+7. Main app validates origin and receives public_token
+8. Main app exchanges public_token with sync-server (access_token stays server-side)
+
+**Implementation files**:
+
+- `packages/sync-server/src/app-plaid/plaid-link-page.html` - Non-isolated popup UI
+- `packages/sync-server/src/app-plaid/app-plaid.ts` - Route serving `/plaid/link` without COEP/COOP
+- `packages/sync-server/src/app.ts` - Header middleware that skips COEP/COOP for `/plaid/link` route
+- `packages/desktop-client/src/components/modals/PlaidLinkModal.tsx` - Popup opener with postMessage listener
+
+**postMessage Security**:
+
+- Validates origin against `serverURL`
+- Validates message type (`plaid-link-success`, `plaid-link-error`, `plaid-link-exit`)
+- Never trusts publicToken without validation
+- Main app still exchanges publicToken with sync-server before using it
+
+**Why this approach**:
+
+- Maintains strict isolation for the main app (preserves SharedArrayBuffer)
+- Plaid Link works in all browsers without CSP violations
+- No access tokens in the browser (server-side only)
+- Industry-standard pattern for integrating third-party popups with isolated apps
 
 ---
 
