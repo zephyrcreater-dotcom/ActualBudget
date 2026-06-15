@@ -239,6 +239,20 @@ Latest recorded result:
 - build: `✓ built in 57ms`
 - test: `Test Files 45 passed (45)`, `Tests 563 passed (563)`
 
+### Plaid Desktop-Client UI (2026-06-15 Phase 3)
+
+Latest recorded validation commands:
+
+- `yarn workspace @actual-app/web typecheck`
+- `yarn workspace @actual-app/web test` (in progress)
+- `yarn workspace @actual-app/web build` (in progress)
+
+Latest recorded result:
+
+- typecheck: `🎉 All files passed` (676 strict files)
+- test: running
+- build: running
+
 ---
 
 ## 7. Known Issues / Caveats
@@ -250,11 +264,16 @@ Latest recorded result:
 - The dashboard now uses real data, but it should continue to stay visually native to Actual rather than becoming flashy or SaaS-like.
 - `Retirement Progress` is still a placeholder.
 - `Investments` is still a placeholder.
-- Plaid SDK integration is complete with real API calls:
-  - ✅ Plaid SDK (`plaid` ^28.0.0) fully integrated
+- Plaid integration is now complete through Phase 3:
+  - ✅ Plaid SDK (`plaid` ^28.0.0) fully integrated (server-side)
   - ✅ Link token creation, public token exchange, account fetching wired
   - ✅ Access tokens stored securely server-side only
-  - → Still needed: Desktop-client UI, loot-core dispatch, transaction import
+  - ✅ Desktop-client UI implemented:
+    - Plaid provider added to bank sync options
+    - Plaid Link modal with Plaid Link web flow
+    - Account selection and linking flow
+    - Server-side handlers for linking accounts
+  - → Still needed: Transaction import and sync in loot-core
 - Supabase Auth has not been implemented yet.
 - The hidden AI panel code still exists on disk, but AI is no longer part of primary navigation and should stay secondary.
 

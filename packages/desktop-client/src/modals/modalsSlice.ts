@@ -17,6 +17,7 @@ import type {
   UserEntity,
 } from '@actual-app/core/types/models';
 import type { CleanupTemplate } from '@actual-app/core/types/models/cleanup-templates';
+import type { SyncServerPlaidAccount } from '@actual-app/core/types/models/plaid';
 import type { Template } from '@actual-app/core/types/models/templates';
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
@@ -658,6 +659,24 @@ export type Modal =
         categoryId: CategoryEntity['id'];
         templates: Template[];
         cleanup: CleanupTemplate[];
+      };
+    }
+  | {
+      name: 'plaid-init';
+      options: {
+        onSuccess: () => void;
+      };
+    }
+  | {
+      name: 'plaid-link';
+      options: {
+        onSuccess: (data: {
+          accounts: SyncServerPlaidAccount[];
+          itemId: string;
+          institutionId?: string;
+          institutionName?: string;
+        }) => Promise<void>;
+        onClose?: () => void;
       };
     };
 

@@ -75,13 +75,31 @@
   - `yarn workspace @actual-app/sync-server build` ✅ (57ms build time)
   - `yarn workspace @actual-app/sync-server test` ✅ (45 test files, 563 total tests)
 
+**Phase 3: Desktop Client UI (2026-06-15)**
+
+- [x] Added Plaid to SYNC_PROVIDERS in `packages/loot-core/src/types/models/bank-sync.ts`
+- [x] Added Plaid to built-in provider list in `packages/desktop-client/src/components/banksync/bankSyncUtils.ts`
+- [x] Created Plaid helper module `packages/desktop-client/src/plaid.ts` with:
+  - `callSyncServer()` for API calls to sync-server
+  - `authorizeBank()` to initiate Plaid Link flow
+  - `createLinkToken()` to get link token from sync-server
+  - `exchangePublicToken()` to exchange public token for access token
+  - `getPlaidAccounts()` to fetch linked accounts
+- [x] Created `packages/desktop-client/src/hooks/usePlaidStatus.ts` hook to check Plaid configuration
+- [x] Created `packages/desktop-client/src/components/modals/PlaidInitModal.tsx` for server setup info
+- [x] Created `packages/desktop-client/src/components/modals/PlaidLinkModal.tsx` to handle Plaid Link flow
+- [x] Integrated Plaid into `useBuiltInBankSyncProviders.ts` with proper handlers
+- [x] Added Plaid support to `SelectLinkedAccountsModal.tsx` account selection flow
+- [x] Created `useLinkAccountPlaidMutation()` in `packages/desktop-client/src/accounts/mutations.ts`
+- [x] Implemented `linkPlaidAccount()` handler in `packages/loot-core/src/server/accounts/app.ts`
+- [x] Registered `plaid-accounts-link` message handler in loot-core app
+- [x] Added proper TypeScript support with SyncServerPlaidAccount type
+- [x] Validation (Phase 3):
+  - `yarn workspace @actual-app/web typecheck` ✅ (676 strict files)
+  - `yarn workspace @actual-app/web test` (in progress)
+  - `yarn workspace @actual-app/web build` ✅
+
 ### 🚧 Next Phases (Not Yet Implemented)
-
-**Phase 3: Desktop Client UI**
-
-- Add Plaid to `useBuiltInBankSyncProviders.ts`
-- Implement Plaid provider card and setup flow
-- Create Plaid auth helper (similar to `gocardless.ts`)
 
 **Phase 4: Loot-Core Provider Dispatch**
 

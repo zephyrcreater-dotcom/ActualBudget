@@ -36,6 +36,7 @@ import type {
   SyncServerSimpleFinAccount,
   TransactionEntity,
 } from '#types/models';
+import type { SyncServerPlaidAccount } from '#types/models/plaid';
 
 import * as link from './link';
 import { getStartingBalancePayee } from './payees';
@@ -59,6 +60,7 @@ export type AccountHandlers = {
   'pluggyai-accounts-link': typeof linkPluggyAiAccount;
   'akahu-accounts-link': typeof linkAkahuAccount;
   'enablebanking-accounts-link': typeof linkEnableBankingAccount;
+  'plaid-accounts-link': typeof linkPlaidAccount;
   'account-create': typeof createAccount;
   'account-close': typeof closeAccount;
   'account-reopen': typeof reopenAccount;
@@ -521,6 +523,89 @@ async function linkEnableBankingAccount({
 
   if (id == null) {
     throw new Error('id was not assigned in linkEnableBankingAccount');
+  }
+
+  const syncRes = await bankSync.syncAccount(
+    undefined,
+    undefined,
+    id,
+    externalAccount.account_id,
+    bank.bank_id,
+    startingDate,
+    startingBalance,
+  );
+
+  await handleSyncResponse(syncRes, id);
+
+  connection.send('sync-event', {
+    type: 'success',
+    tables: ['transactions', 'accounts'],
+  });
+
+  return 'ok';
+}
+
+async function linkPlaidAccount({
+  externalAccount,
+  upgradingId,
+  offBudget = false,
+  startingDate,
+  startingBalance,
+}: LinkAccountBaseParams & {
+  externalAccount: SyncServerPlaidAccount;
+}) {
+  let id: string | undefined;
+
+  const institution = {
+    // Persist a null name when the provider doesn't report an institution, so
+    // the desktop-client can render a localized fallback instead of baking an
+    // English string into shared bank data.
+    name: null,
+  };
+
+  // Plaid uses itemId as the institution-level identifier, similar to
+  // SimpleFin's orgDomain. If itemId is not available, fall back to account_id.
+  const bank = await link.findOrCreateBank(
+    institution,
+    externalAccount.itemId || externalAccount.account_id,
+  );
+
+  if (upgradingId) {
+    const accRow = await db.first<db.DbAccount>(
+      'SELECT * FROM accounts WHERE id = ?',
+      [upgradingId],
+    );
+
+    if (!accRow) {
+      throw new Error(`Account with ID ${upgradingId} not found.`);
+    }
+
+    id = accRow.id;
+    await db.update('accounts', {
+      id,
+      account_id: externalAccount.account_id,
+      bank: bank.id,
+      account_sync_source: 'plaid',
+    });
+  } else {
+    id = uuidv4();
+    await db.insertWithUUID('accounts', {
+      id,
+      account_id: externalAccount.account_id,
+      name: externalAccount.name,
+      official_name: externalAccount.official_name || externalAccount.name,
+      bank: bank.id,
+      offbudget: offBudget ? 1 : 0,
+      account_sync_source: 'plaid',
+    });
+    await db.insertPayee({
+      name: '',
+      transfer_acct: id,
+    });
+  }
+
+  if (id == null) {
+    throw new Error('id was not assigned in linkPlaidAccount');
   }
 
   const syncRes = await bankSync.syncAccount(
@@ -1728,6 +1813,7 @@ app.method('simplefin-accounts-link', linkSimpleFinAccount);
 app.method('pluggyai-accounts-link', linkPluggyAiAccount);
 app.method('akahu-accounts-link', linkAkahuAccount);
 app.method('enablebanking-accounts-link', linkEnableBankingAccount);
+app.method('plaid-accounts-link', linkPlaidAccount);
 app.method('account-create', mutator(undoable(createAccount)));
 app.method('account-close', mutator(closeAccount));
 app.method('account-reopen', mutator(undoable(reopenAccount)));

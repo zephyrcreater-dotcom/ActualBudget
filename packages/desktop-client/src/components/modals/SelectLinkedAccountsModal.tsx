@@ -19,12 +19,14 @@ import type {
   SyncServerPluggyAiAccount,
   SyncServerSimpleFinAccount,
 } from '@actual-app/core/types/models';
+import type { SyncServerPlaidAccount } from '@actual-app/core/types/models/plaid';
 import { format as formatDate, parseISO } from 'date-fns';
 
 import {
   useLinkAccountAkahuMutation,
   useLinkAccountEnableBankingMutation,
   useLinkAccountMutation,
+  useLinkAccountPlaidMutation,
   useLinkAccountPluggyAiMutation,
   useLinkAccountSimpleFinMutation,
   useUnlinkAccountMutation,
@@ -103,6 +105,13 @@ export type SelectLinkedAccountsModalProps =
       externalAccounts: SyncServerAkahuAccount[];
       syncSource: 'akahu';
       upgradingAccountId?: string;
+    }
+  | {
+      requisitionId?: undefined;
+      itemId?: string;
+      externalAccounts: SyncServerPlaidAccount[];
+      syncSource: 'plaid';
+      upgradingAccountId?: string;
     };
 
 export function SelectLinkedAccountsModal({
@@ -149,6 +158,12 @@ export function SelectLinkedAccountsModal({
           return {
             syncSource: 'enableBanking',
             externalAccounts: toSort as SyncServerEnableBankingAccount[],
+            upgradingAccountId,
+          };
+        case 'plaid':
+          return {
+            syncSource: 'plaid',
+            externalAccounts: toSort as SyncServerPlaidAccount[],
             upgradingAccountId,
           };
         default:
@@ -222,6 +237,7 @@ export function SelectLinkedAccountsModal({
   const linkAccountPluggyAi = useLinkAccountPluggyAiMutation();
   const linkAccountAkahu = useLinkAccountAkahuMutation();
   const linkAccountEnableBanking = useLinkAccountEnableBankingMutation();
+  const linkAccountPlaid = useLinkAccountPlaidMutation();
 
   async function onNext() {
     const chosenLocalAccountIds = Object.values(chosenAccounts);
@@ -319,6 +335,21 @@ export function SelectLinkedAccountsModal({
             startingDate,
             startingBalance,
           });
+        } else if (propsWithSortedExternalAccounts.syncSource === 'plaid') {
+          linkAccountPlaid.mutate({
+            externalAccount:
+              propsWithSortedExternalAccounts.externalAccounts[
+                externalAccountIndex
+              ],
+            upgradingId:
+              chosenLocalAccountId !== addOnBudgetAccountOption.id &&
+              chosenLocalAccountId !== addOffBudgetAccountOption.id
+                ? chosenLocalAccountId
+                : undefined,
+            offBudget,
+            startingDate,
+            startingBalance,
+          });
         } else {
           linkAccount.mutate({
             requisitionId: propsWithSortedExternalAccounts.requisitionId,
@@ -351,7 +382,9 @@ export function SelectLinkedAccountsModal({
       | SyncServerGoCardlessAccount
       | SyncServerSimpleFinAccount
       | SyncServerPluggyAiAccount
-      | SyncServerAkahuAccount,
+      | SyncServerAkahuAccount
+      | SyncServerEnableBankingAccount
+      | SyncServerPlaidAccount,
     localAccountId: string | null | undefined,
   ) {
     setChosenAccounts(accounts => {

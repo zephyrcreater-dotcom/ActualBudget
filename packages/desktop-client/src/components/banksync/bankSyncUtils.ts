@@ -12,6 +12,7 @@ export const BUILT_IN_BANK_SYNC_PROVIDERS = [
   'goCardless',
   'simpleFin',
   'pluggyai',
+  'plaid',
 ] as const satisfies BankSyncProviders[];
 
 const SYNC_PROVIDER_KEYS = [
@@ -36,6 +37,7 @@ export function getSyncSourceReadable(
     pluggyai: 'Pluggy.ai',
     enableBanking: 'Enable Banking',
     akahu: 'Akahu',
+    plaid: 'Plaid',
     unlinked: translate('Unlinked'),
   };
 }
