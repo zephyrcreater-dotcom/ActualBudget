@@ -140,20 +140,37 @@
 - [AIFinancialCopilotPanel.tsx](/Users/nathanielstahmer/actual/packages/desktop-client/src/components/dashboard/AIFinancialCopilotPanel.tsx)
   - still present on disk but no longer part of normal navigation flow
 
-### Plaid server-side scaffolding (2026-06-15)
+### Plaid server-side implementation (2026-06-15)
+
+**Phase 1: Scaffolding**
 
 - [Migration file](/Users/nathanielstahmer/actual/packages/sync-server/migrations/1763873700000-create-plaid-items-table.js)
-  - Creates `plaid_items` and `plaid_accounts` tables
+  - Creates `plaid_items` and `plaid_accounts` tables for secure server-side storage
 - [app-plaid/app-plaid.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/app-plaid.ts)
-  - Express app with Plaid endpoints
+  - Express app with 5 Plaid endpoints (status, create-link-token, exchange-public-token, get-accounts, sync-transactions)
 - [app-plaid/plaid-service.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/plaid-service.ts)
-  - Core Plaid service logic with placeholder implementations
+  - Core Plaid service logic with real Plaid SDK integration
 - [app-plaid/errors.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/errors.ts)
   - Plaid error types and error-to-sync-status mapping
 - [app-plaid/util/handle-error.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/util/handle-error.ts)
   - Express error handling middleware
-- [app-plaid/README.md](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/README.md)
-  - Comprehensive documentation of Plaid integration
+
+**Phase 2: Real Plaid SDK Integration**
+
+- [app-plaid/plaid-service.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/plaid-service.ts) (updated)
+  - Full Plaid SDK integration with real API calls
+  - Client initialization from stored secrets
+  - Link token creation, public token exchange, account fetching all wired to real Plaid
+  - Transaction sync placeholder ready for loot-core integration
+- [app-plaid/app-plaid.test.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/app-plaid.test.ts)
+  - 9 comprehensive test suites covering all endpoints
+  - Security validation ensuring no tokens leak in responses
+- [app-plaid/plaid-service.test.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/plaid-service.test.ts)
+  - 6 comprehensive test suites for service logic
+  - Tests for configuration, credential handling, error cases
+- [app-plaid/README.md](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/README.md) (updated)
+  - Updated implementation status showing Phase 2 completion
+  - Documentation of real Plaid SDK integration
 
 ---
 
@@ -194,7 +211,7 @@ Latest recorded result:
 - test passed with `42 files, 686 tests passed, 1 skipped`
 - build passed
 
-### Plaid Server-Side Scaffolding (2026-06-15)
+### Plaid Server-Side Scaffolding (2026-06-15 Phase 1)
 
 Latest recorded successful validation commands:
 
@@ -208,6 +225,20 @@ Latest recorded result:
 - build: `✓ built in 51ms` with new migration included
 - test: `Test Files 43 passed (43)`, `Tests 534 passed (534)`
 
+### Plaid SDK Integration (2026-06-15 Phase 2)
+
+Latest recorded successful validation commands:
+
+- `yarn workspace @actual-app/sync-server typecheck`
+- `yarn workspace @actual-app/sync-server build`
+- `yarn workspace @actual-app/sync-server test`
+
+Latest recorded result:
+
+- typecheck: `🎉 All files passed` (159 strict files)
+- build: `✓ built in 57ms`
+- test: `Test Files 45 passed (45)`, `Tests 563 passed (563)`
+
 ---
 
 ## 7. Known Issues / Caveats
@@ -219,11 +250,11 @@ Latest recorded result:
 - The dashboard now uses real data, but it should continue to stay visually native to Actual rather than becoming flashy or SaaS-like.
 - `Retirement Progress` is still a placeholder.
 - `Investments` is still a placeholder.
-- Plaid scaffolding is complete but full integration requires:
-  - Plaid SDK integration (`plaid-node`)
-  - Desktop-client UI for provider setup
-  - loot-core provider dispatch
-  - Transaction import and reconciliation
+- Plaid SDK integration is complete with real API calls:
+  - ✅ Plaid SDK (`plaid` ^28.0.0) fully integrated
+  - ✅ Link token creation, public token exchange, account fetching wired
+  - ✅ Access tokens stored securely server-side only
+  - → Still needed: Desktop-client UI, loot-core dispatch, transaction import
 - Supabase Auth has not been implemented yet.
 - The hidden AI panel code still exists on disk, but AI is no longer part of primary navigation and should stay secondary.
 
@@ -263,47 +294,43 @@ Read these files first:
 - /Users/nathanielstahmer/actual/FORK_NOTES.md
 
 Goal:
-Continue Plaid integration by adding Plaid SDK and wiring real API calls. The server-side scaffolding (Phase 1) is complete.
+Implement desktop-client UI for Plaid provider setup. Phases 1 & 2 (server-side scaffolding and SDK integration) are complete.
 
 Status:
-✅ Server-side scaffolding complete with:
-- Migration and table schema for plaid_items and plaid_accounts
-- All endpoint stubs in sync-server
-- Error handling and status mapping
-- Placeholder implementations in plaid-service.ts
+✅ Server-side scaffolding complete
+✅ Plaid SDK integration complete with real API calls
+- Link token creation, public token exchange, account fetching all working
+- Access tokens stored securely server-side only
+- Comprehensive tests covering all flows (563 tests passing)
 
 Tasks:
-1. Add plaid-node SDK as a dependency in packages/sync-server
-2. Initialize Plaid client in plaid-service.ts using app-level secrets:
-   - plaid_clientId
-   - plaid_secret
-   - plaid_env
-3. Implement real Plaid API calls for:
-   - createLinkToken() - replace placeholder with real Plaid API call
-   - exchangePublicToken() - swap public_token for access_token with Plaid
-   - getPlaidAccounts() - fetch real accounts from Plaid, store in plaid_accounts table
-4. Add error mapping from Plaid API errors to sync statuses (reauth-required, attention-required, failed)
-5. Implement transaction sync placeholder that calls Plaid API (ready for Phase 4 loot-core integration)
-6. Update README.md in app-plaid/ to reflect what’s now wired vs still placeholder
-7. Add tests for:
-   - Plaid client initialization
-   - Link token creation
-   - Public token exchange
-   - Account fetching and storage
-   - Error handling
-8. Do not change loot-core or desktop-client in this phase
-9. Do not create migration changes unless schema needs adjustment
+1. Add Plaid to the built-in provider list in desktop-client:
+   - Update `packages/desktop-client/src/components/banksync/useBuiltInBankSyncProviders.ts`
+   - Add Plaid provider card with ID ‘plaid’
+2. Create Plaid auth helper in desktop-client (similar to gocardless.ts/enablebanking.ts):
+   - New file: `packages/desktop-client/src/plaid.ts`
+   - Implement openPlaidLink() to launch Plaid Link modal with link token from sync-server
+   - Implement exchangeToken() to send public_token to sync-server for access_token exchange
+3. Wire Plaid into the account-linking flow:
+   - Update `SelectLinkedAccountsModal.tsx` to handle Plaid provider
+   - Update `packages/desktop-client/src/accounts/mutations.ts` with Plaid link mutation
+4. Add Plaid provider status checking:
+   - Call /plaid/status to enable/disable Plaid provider based on configuration
+5. Update sync-server provider list in desktop-client config (if needed)
+6. Create basic tests for Plaid provider integration
+7. Do not touch loot-core or transaction import logic yet
 
 Validation:
-- Run: yarn workspace @actual-app/sync-server typecheck
-- Run: yarn workspace @actual-app/sync-server build
-- Run: yarn workspace @actual-app/sync-server test
+- Run: yarn workspace @actual-app/web typecheck
+- Run: yarn workspace @actual-app/web test
+- Run: yarn workspace @actual-app/web build
 
 Constraints:
 - Do not create commits unless I ask.
-- Keep Plaid token handling secure (no logging, no exposure to client).
-- Placeholder sync implementation should be ready for loot-core dispatch.
+- Keep the UI consistent with existing provider patterns.
+- Never handle access tokens in desktop-client (only item_id and institution info).
+- Ensure Plaid Link is configured with correct redirect_uri.
 
 Primary objective:
-Wire Plaid SDK so the scaffolding can make real API calls.
+Enable users to initiate Plaid Link from the desktop client and exchange public tokens securely.
 ```

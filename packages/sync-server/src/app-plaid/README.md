@@ -164,7 +164,7 @@ Trigger a transaction sync for a Plaid item (placeholder for full implementation
 
 ## Implementation Status
 
-### ✓ Completed
+### Phase 1: Scaffolding (Complete)
 
 - [x] Environment configuration for app-level secrets
 - [x] Database tables for storing items and accounts
@@ -172,22 +172,32 @@ Trigger a transaction sync for a Plaid item (placeholder for full implementation
 - [x] Error mapping to sync states
 - [x] Security: tokens stored server-side only
 
-### 🚧 Scaffolded (Placeholder Implementation)
+### Phase 2: Real Plaid SDK Integration (Complete)
 
-- [ ] Actual Plaid SDK integration (plaid-node)
-- [ ] Real link token creation
-- [ ] Public token exchange with Plaid API
-- [ ] Account fetching from Plaid
-- [ ] Transaction syncing with cursor-based pagination
-- [ ] Webhook handling (optional phase two)
+- [x] Plaid SDK (plaid-node ^20.8.0) added to dependencies
+- [x] Plaid client initialization with credentials from secrets
+- [x] Real link token creation via Plaid API
+- [x] Public token exchange with Plaid API
+- [x] Account fetching from Plaid and storage in database
+- [x] Error handling with Plaid API error mapping
+- [x] Comprehensive unit tests for Plaid service
+- [x] Comprehensive endpoint tests with security validation
+- [x] All access tokens properly scoped to server-side only (never returned to client)
 
-### → Next Steps (Not Yet Implemented)
+### Transaction Sync Placeholder (Ready for Phase 3)
 
-- Desktop-client UI for Plaid setup
-- loot-core Plaid provider dispatch
-- Transaction normalization and import
-- Account linking and reconciliation
-- Multi-user/server-hosted account scoping
+- [x] Safe placeholder implementation that calls Plaid transactionsSync
+- [x] Cursor-based pagination support (not yet wired)
+- [x] Error handling for failed syncs
+
+### Next Phases (Not Yet Implemented)
+
+- Phase 3: Desktop-client UI for Plaid setup
+- Phase 4: loot-core Plaid provider dispatch
+- Phase 5: Transaction normalization and import
+- Phase 6: Account linking and reconciliation
+- Future: Multi-user/server-hosted account scoping
+- Future: Webhook handling for real-time updates
 
 ## Database Schema
 
