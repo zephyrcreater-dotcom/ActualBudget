@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes, useHref, useLocation } from 'react-router';
 
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
+import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import * as undo from '@actual-app/core/platform/client/undo';
@@ -28,6 +29,9 @@ import { CommandBar } from './CommandBar';
 import { EnableBankingCallback } from './EnableBankingCallback';
 import { FeatureErrorFallback } from './FeatureErrorFallback';
 import { GlobalKeys } from './GlobalKeys';
+import { AIFinancialCopilotPanel } from './dashboard/AIFinancialCopilotPanel';
+import { DashboardPage } from './dashboard/DashboardPage';
+import { PlaceholderPage } from './dashboard/PlaceholderPage';
 import { MobileBankSyncAccountEditPage } from './mobile/banksync/MobileBankSyncAccountEditPage';
 import { MobileNavTabs } from './mobile/MobileNavTabs';
 import { TransactionEdit } from './mobile/transactions/TransactionEdit';
@@ -119,7 +123,7 @@ export function FinancesApp() {
         addNotification({
           notification: {
             type: 'message',
-            title: t('A new version of Actual is available!'),
+            title: t('A new version of Nathaniel Budget is available!'),
             message: t(
               'Click the button below to reload and apply the update.',
             ),
@@ -155,15 +159,15 @@ export function FinancesApp() {
           addNotification({
             notification: {
               type: 'message',
-              title: t('A new version of Actual is available!'),
+              title: t('A new version of Nathaniel Budget is available!'),
               message:
                 (process.env.REACT_APP_IS_PIKAPODS ?? '').toLowerCase() ===
                 'true'
                   ? t(
-                      'A new version of Actual is available! Your Pikapods instance will be automatically updated in the next few days - no action needed.',
+                      'A new version of Nathaniel Budget is available! Your Pikapods instance will be automatically updated in the next few days - no action needed.',
                     )
                   : t(
-                      'Version {{latestVersion}} of Actual was recently released.',
+                      'Version {{latestVersion}} of Nathaniel Budget was recently released.',
                       { latestVersion: versionInfo.latestVersion },
                     ),
               sticky: true,
@@ -250,7 +254,7 @@ export function FinancesApp() {
                       isAccountsFetching || !accounts ? (
                         <LoadingIndicator />
                       ) : accounts.length > 0 ? (
-                        <Navigate to="/budget" replace />
+                        <Navigate to="/dashboard" replace />
                       ) : (
                         // If there are no accounts, we want to redirect the user to
                         // the All Accounts screen which will prompt them to add an account
@@ -259,6 +263,7 @@ export function FinancesApp() {
                     }
                   />
 
+                  <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/reports/*" element={<Reports />} />
 
                   <Route
@@ -327,6 +332,48 @@ export function FinancesApp() {
                   />
                   <Route path="/tags" element={<ManageTagsPage />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route
+                    path="/investments"
+                    element={
+                      <PlaceholderPage
+                        title={t('Investments')}
+                        eyebrow={t('Future planning workspace')}
+                      >
+                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
+                          {t(
+                            'Investment and retirement tracking will live here in a future fork milestone.',
+                          )}
+                        </Text>
+                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
+                          {t(
+                            'Planned modules include holdings, account performance, retirement goals, and contribution pacing.',
+                          )}
+                        </Text>
+                      </PlaceholderPage>
+                    }
+                  />
+                  <Route
+                    path="/ai-copilot"
+                    element={
+                      <PlaceholderPage
+                        title={t('AI Copilot')}
+                        eyebrow={t('Financial guidance hub')}
+                      >
+                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
+                          {t('Can I afford this purchase?')}
+                        </Text>
+                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
+                          {t('What did I spend on golf this year?')}
+                        </Text>
+                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
+                          {t('Am I on track for my Roth IRA?')}
+                        </Text>
+                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
+                          {t('Budget recommendations coming soon.')}
+                        </Text>
+                      </PlaceholderPage>
+                    }
+                  />
 
                   <Route
                     path="/gocardless/link"
@@ -388,15 +435,18 @@ export function FinancesApp() {
                       }
                     />
                   )}
-                  {/* redirect all other traffic to the budget page */}
+                  {/* redirect all other traffic to the dashboard page */}
                   <Route
                     path="/*"
-                    element={<Navigate to="/budget" replace />}
+                    element={<Navigate to="/dashboard" replace />}
                   />
                 </Routes>
               </View>
 
+              <AIFinancialCopilotPanel />
+
               <Routes>
+                <Route path="/dashboard" element={<MobileNavTabs />} />
                 <Route path="/budget" element={<MobileNavTabs />} />
                 <Route path="/accounts" element={<MobileNavTabs />} />
                 <Route path="/settings" element={<MobileNavTabs />} />
@@ -405,6 +455,8 @@ export function FinancesApp() {
                   path="/reports/:dashboardId"
                   element={<MobileNavTabs />}
                 />
+                <Route path="/investments" element={<MobileNavTabs />} />
+                <Route path="/ai-copilot" element={<MobileNavTabs />} />
                 <Route path="/bank-sync" element={<MobileNavTabs />} />
                 <Route path="/rules" element={<MobileNavTabs />} />
                 <Route path="/payees" element={<MobileNavTabs />} />

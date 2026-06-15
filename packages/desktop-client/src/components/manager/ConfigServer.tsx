@@ -411,13 +411,14 @@ export function ConfigServer() {
             {currentUrl ? (
               <Trans>
                 Existing sessions will be logged out and you will log in to this
-                server. We will validate that Actual is running at this URL.
+                server. We will validate that Nathaniel Budget is running at
+                this URL.
               </Trans>
             ) : (
               <Trans>
                 There is no server configured. After running the server, specify
                 the URL here to use the app. You can always change this later.
-                We will validate that Actual is running at this URL.
+                We will validate that Nathaniel Budget is running at this URL.
               </Trans>
             )}
           </Text>

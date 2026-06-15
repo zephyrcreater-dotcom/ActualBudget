@@ -343,7 +343,7 @@ async function createWindow() {
     y: windowState.y,
     width: windowState.width,
     height: windowState.height,
-    title: 'Actual',
+    title: 'Nathaniel Budget',
     webPreferences: {
       nodeIntegration: false,
       nodeIntegrationInWorker: false,

@@ -31,8 +31,8 @@ export function WelcomeScreen() {
       <View style={{ overflowY: 'auto' }}>
         <Paragraph>
           <Trans>
-            Actual is a personal finance tool that focuses on beautiful design
-            and a slick user experience.{' '}
+            Nathaniel Budget is a personal finance tool that focuses on
+            beautiful design and a slick user experience.{' '}
             <strong>Editing your data should be as fast as possible.</strong> On
             top of that, we want to provide powerful tools to allow you to do
             whatever you want with your data.
@@ -66,10 +66,10 @@ export function WelcomeScreen() {
         </Paragraph>
         <Paragraph style={{ color: theme.pageTextLight }}>
           <Trans>
-            Get started by importing an existing budget file from Actual or
-            another budgeting app, create a demo budget file, or start fresh
-            with an empty budget. You can always create or import another budget
-            later.
+            Get started by importing an existing budget file from Actual,
+            Nathaniel Budget, or another budgeting app, create a demo budget
+            file, or start fresh with an empty budget. You can always create or
+            import another budget later.
           </Trans>
         </Paragraph>
       </View>
