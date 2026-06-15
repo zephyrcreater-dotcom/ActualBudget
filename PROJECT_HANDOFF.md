@@ -140,6 +140,21 @@
 - [AIFinancialCopilotPanel.tsx](/Users/nathanielstahmer/actual/packages/desktop-client/src/components/dashboard/AIFinancialCopilotPanel.tsx)
   - still present on disk but no longer part of normal navigation flow
 
+### Plaid server-side scaffolding (2026-06-15)
+
+- [Migration file](/Users/nathanielstahmer/actual/packages/sync-server/migrations/1763873700000-create-plaid-items-table.js)
+  - Creates `plaid_items` and `plaid_accounts` tables
+- [app-plaid/app-plaid.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/app-plaid.ts)
+  - Express app with Plaid endpoints
+- [app-plaid/plaid-service.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/plaid-service.ts)
+  - Core Plaid service logic with placeholder implementations
+- [app-plaid/errors.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/errors.ts)
+  - Plaid error types and error-to-sync-status mapping
+- [app-plaid/util/handle-error.ts](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/util/handle-error.ts)
+  - Express error handling middleware
+- [app-plaid/README.md](/Users/nathanielstahmer/actual/packages/sync-server/src/app-plaid/README.md)
+  - Comprehensive documentation of Plaid integration
+
 ---
 
 ## 5. Architecture Summary
@@ -165,7 +180,9 @@
 
 ## 6. Validation Status
 
-Latest recorded successful validation commands for the current dashboard/affordability shell work:
+### Dashboard/Affordability Shell (Previous)
+
+Latest recorded successful validation commands:
 
 - `yarn workspace @actual-app/web typecheck`
 - `yarn workspace @actual-app/web test`
@@ -177,10 +194,19 @@ Latest recorded result:
 - test passed with `42 files, 686 tests passed, 1 skipped`
 - build passed
 
-Note:
+### Plaid Server-Side Scaffolding (2026-06-15)
 
-- These are the latest successful results recorded during the recent UI/dashboard work.
-- They were not re-run during this handoff-only step.
+Latest recorded successful validation commands:
+
+- `yarn workspace @actual-app/sync-server typecheck`
+- `yarn workspace @actual-app/sync-server build`
+- `yarn workspace @actual-app/sync-server test`
+
+Latest recorded result:
+
+- typecheck: `🎉 All files passed`
+- build: `✓ built in 51ms` with new migration included
+- test: `Test Files 43 passed (43)`, `Tests 534 passed (534)`
 
 ---
 
@@ -193,7 +219,11 @@ Note:
 - The dashboard now uses real data, but it should continue to stay visually native to Actual rather than becoming flashy or SaaS-like.
 - `Retirement Progress` is still a placeholder.
 - `Investments` is still a placeholder.
-- Plaid integration has not been implemented yet.
+- Plaid scaffolding is complete but full integration requires:
+  - Plaid SDK integration (`plaid-node`)
+  - Desktop-client UI for provider setup
+  - loot-core provider dispatch
+  - Transaction import and reconciliation
 - Supabase Auth has not been implemented yet.
 - The hidden AI panel code still exists on disk, but AI is no longer part of primary navigation and should stay secondary.
 
@@ -203,10 +233,10 @@ Note:
 
 Recommended order:
 
-1. Commit any uncommitted work.
-   - At handoff time, the worktree is clean, so there is nothing pending right now.
+1. Commit the Plaid server-side scaffolding work (completed 2026-06-15).
+   - The worktree has clean implementation with passing tests.
    - Continue using small, reviewable commits for future work.
-2. Implement Plaid server-side scaffolding in `packages/sync-server`.
+2. Add Plaid SDK integration (`plaid-node`) and wire real API calls.
 3. Add Plaid Link UI in `packages/desktop-client`.
 4. Exchange Plaid `public_token` securely through the existing sync-server-backed flow.
 5. Store Plaid item tokens server-side only.
@@ -233,37 +263,47 @@ Read these files first:
 - /Users/nathanielstahmer/actual/FORK_NOTES.md
 
 Goal:
-Implement the first Plaid server-side scaffolding only. Do not add the full transaction sync yet.
+Continue Plaid integration by adding Plaid SDK and wiring real API calls. The server-side scaffolding (Phase 1) is complete.
+
+Status:
+✅ Server-side scaffolding complete with:
+- Migration and table schema for plaid_items and plaid_accounts
+- All endpoint stubs in sync-server
+- Error handling and status mapping
+- Placeholder implementations in plaid-service.ts
 
 Tasks:
-1. Inspect the existing sync-server provider pattern for:
-   - GoCardless
-   - SimpleFIN
-   - Enable Banking
-2. Add initial Plaid provider scaffolding in packages/sync-server:
-   - route mounting in sync-server app
-   - provider folder structure
-   - placeholder handlers for status, create-link-token, exchange-public-token, accounts
-3. Add any necessary secret-name definitions for app-level Plaid credentials only:
+1. Add plaid-node SDK as a dependency in packages/sync-server
+2. Initialize Plaid client in plaid-service.ts using app-level secrets:
    - plaid_clientId
    - plaid_secret
    - plaid_env
-4. Do not add real Plaid SDK calls yet unless the codebase already has a suitable pattern.
-5. Do not change loot-core accounting logic.
-6. Do not change reconciliation logic.
-7. Do not store Plaid item access tokens in the budget database.
-8. If item-token persistence is needed for scaffolding, put it in sync-server only and document the schema choice.
-9. Create or update tests for the new sync-server scaffolding where appropriate.
-10. Update PLAID_INTEGRATION_PLAN.md or FORK_NOTES.md if implementation details materially change.
+3. Implement real Plaid API calls for:
+   - createLinkToken() - replace placeholder with real Plaid API call
+   - exchangePublicToken() - swap public_token for access_token with Plaid
+   - getPlaidAccounts() - fetch real accounts from Plaid, store in plaid_accounts table
+4. Add error mapping from Plaid API errors to sync statuses (reauth-required, attention-required, failed)
+5. Implement transaction sync placeholder that calls Plaid API (ready for Phase 4 loot-core integration)
+6. Update README.md in app-plaid/ to reflect what’s now wired vs still placeholder
+7. Add tests for:
+   - Plaid client initialization
+   - Link token creation
+   - Public token exchange
+   - Account fetching and storage
+   - Error handling
+8. Do not change loot-core or desktop-client in this phase
+9. Do not create migration changes unless schema needs adjustment
 
 Validation:
-- Run the relevant sync-server and workspace tests/typechecks/build steps for the files you change.
+- Run: yarn workspace @actual-app/sync-server typecheck
+- Run: yarn workspace @actual-app/sync-server build
+- Run: yarn workspace @actual-app/sync-server test
 
 Constraints:
 - Do not create commits unless I ask.
-- Do not add unrelated refactors.
-- Keep the change small and architectural.
+- Keep Plaid token handling secure (no logging, no exposure to client).
+- Placeholder sync implementation should be ready for loot-core dispatch.
 
 Primary objective:
-Lay the foundation for Plaid in sync-server using Actual’s existing provider architecture.
+Wire Plaid SDK so the scaffolding can make real API calls.
 ```

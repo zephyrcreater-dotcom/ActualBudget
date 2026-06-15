@@ -19,6 +19,9 @@ export const SecretName = {
   akahu_appToken: 'akahu_appToken',
   enablebanking_applicationId: 'enablebanking_applicationId',
   enablebanking_secretKey: 'enablebanking_secretKey',
+  plaid_clientId: 'plaid_clientId',
+  plaid_secret: 'plaid_secret',
+  plaid_env: 'plaid_env',
 };
 
 class SecretsDb {

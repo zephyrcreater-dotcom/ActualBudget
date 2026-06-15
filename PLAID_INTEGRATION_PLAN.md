@@ -1,5 +1,77 @@
 # Plaid Integration Plan
 
+## Implementation Status
+
+### ✅ Completed (2026-06-15)
+
+**Phase 1: Server-Side Scaffolding**
+
+- [x] Created `/packages/sync-server/src/app-plaid/` directory structure
+- [x] Added Plaid secret names to `secrets-service.js`:
+  - `plaid_clientId`
+  - `plaid_secret`
+  - `plaid_env`
+- [x] Created migration `1763873700000-create-plaid-items-table.js`:
+  - `plaid_items` table for storing item tokens and metadata
+  - `plaid_accounts` table for storing account information
+- [x] Implemented `app-plaid.ts` with endpoints:
+  - `POST /plaid/status` - Check configuration status
+  - `POST /plaid/create-link-token` - Create link token for frontend
+  - `POST /plaid/exchange-public-token` - Exchange and store access token
+  - `POST /plaid/get-plaid-accounts` - Fetch linked accounts
+  - `POST /plaid/sync-plaid-transactions` - Placeholder for transaction sync
+- [x] Created `plaid-service.ts` with core logic:
+  - Configuration validation
+  - Link token creation (placeholder)
+  - Public token exchange and storage
+  - Account fetching (placeholder)
+  - Transaction sync (placeholder)
+  - Error handling and status tracking
+- [x] Created error handling utilities:
+  - `errors.ts` with Plaid error types
+  - `util/handle-error.ts` for Express middleware
+  - Error mapping to existing sync states
+- [x] Mounted Plaid routes in `app.ts`
+- [x] Updated `package.json` with app-plaid imports
+- [x] Created comprehensive README documenting:
+  - Architecture and design principles
+  - Endpoint specifications
+  - Database schema
+  - Implementation status
+  - Security considerations
+- [x] Validation:
+  - `yarn workspace @actual-app/sync-server typecheck` ✅
+  - `yarn workspace @actual-app/sync-server build` ✅
+  - `yarn workspace @actual-app/sync-server test` ✅ (534 tests passed)
+
+### 🚧 Next Phases (Not Yet Implemented)
+
+**Phase 2: Add Plaid SDK Integration**
+
+- Add `plaid-node` dependency to sync-server
+- Implement real Plaid API calls in placeholder methods
+- Wire Plaid client initialization
+
+**Phase 3: Desktop Client UI**
+
+- Add Plaid to `useBuiltInBankSyncProviders.ts`
+- Implement Plaid provider card and setup flow
+- Create Plaid auth helper (similar to `gocardless.ts`)
+
+**Phase 4: Loot-Core Provider Dispatch**
+
+- Add `plaid` to `SYNC_PROVIDERS` enum
+- Create Plaid download adapter in `accounts/sync.ts`
+- Add Plaid handlers in `accounts/app.ts`
+
+**Phase 5: Transaction Import & Reconciliation**
+
+- Implement transaction normalization
+- Wire Plaid transactions through existing sync pipeline
+- Add balance updates
+
+---
+
 ## Goal
 
 Add Plaid to Actual Budget without disturbing the local-first budgeting engine, reconciliation behavior, or existing sync providers.
