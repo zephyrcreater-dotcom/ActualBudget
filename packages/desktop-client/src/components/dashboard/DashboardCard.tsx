@@ -16,11 +16,11 @@ export function DashboardCard({ title, children }: DashboardCardProps) {
       style={{
         backgroundColor: theme.cardBackground,
         border: '1px solid ' + theme.cardBorder,
-        boxShadow: `0 12px 24px ${theme.cardShadow}`,
+        boxShadow: `0 2px 6px ${theme.cardShadow}`,
         borderRadius: 12,
         padding: 18,
         gap: 14,
-        minHeight: 180,
+        minHeight: 170,
       }}
     >
       <Text

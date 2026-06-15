@@ -53,6 +53,7 @@ function AppInner() {
   const { showBoundary: showErrorBoundary } = useErrorBoundary();
   const dispatch = useDispatch();
   const userData = useSelector(state => state.user.data);
+  const isAppLoading = useSelector(state => state.app.loadingText !== null);
 
   useEffect(() => {
     setI18NextLanguage(null);
@@ -152,7 +153,10 @@ function AppInner() {
     }
   }, [dispatch, t, userData?.tokenExpired]);
 
-  return budgetId ? <FinancesApp /> : <ManagementApp />;
+  // Keep the management shell mounted until the startup lifecycle has fully
+  // completed. This prevents route-level UI from rendering while the budget
+  // file and prefs are still being hydrated.
+  return budgetId && !isAppLoading ? <FinancesApp /> : <ManagementApp />;
 }
 
 function ErrorFallback({ error }: FallbackProps) {

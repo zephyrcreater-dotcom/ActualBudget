@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 
 import {
   SvgCog,
-  SvgChatBubbleDots,
   SvgDashboard,
   SvgPiggyBank,
   SvgReports,
@@ -24,7 +23,6 @@ export function PrimaryButtons() {
       <Item title={t('Accounts')} Icon={SvgPiggyBank} to="/accounts" />
       <Item title={t('Reports')} Icon={SvgReports} to="/reports" />
       <Item title={t('Investments')} Icon={SvgTarget} to="/investments" />
-      <Item title={t('AI Copilot')} Icon={SvgChatBubbleDots} to="/ai-copilot" />
       <Item title={t('Settings')} Icon={SvgCog} to="/settings" />
     </View>
   );

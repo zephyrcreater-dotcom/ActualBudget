@@ -29,7 +29,7 @@ import { CommandBar } from './CommandBar';
 import { EnableBankingCallback } from './EnableBankingCallback';
 import { FeatureErrorFallback } from './FeatureErrorFallback';
 import { GlobalKeys } from './GlobalKeys';
-import { AIFinancialCopilotPanel } from './dashboard/AIFinancialCopilotPanel';
+import { CanIAffordThisPage } from './dashboard/CanIAffordThisPage';
 import { DashboardPage } from './dashboard/DashboardPage';
 import { PlaceholderPage } from './dashboard/PlaceholderPage';
 import { MobileBankSyncAccountEditPage } from './mobile/banksync/MobileBankSyncAccountEditPage';
@@ -337,7 +337,7 @@ export function FinancesApp() {
                     element={
                       <PlaceholderPage
                         title={t('Investments')}
-                        eyebrow={t('Future planning workspace')}
+                        eyebrow={t('Planning')}
                       >
                         <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
                           {t(
@@ -353,26 +353,8 @@ export function FinancesApp() {
                     }
                   />
                   <Route
-                    path="/ai-copilot"
-                    element={
-                      <PlaceholderPage
-                        title={t('AI Copilot')}
-                        eyebrow={t('Financial guidance hub')}
-                      >
-                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
-                          {t('Can I afford this purchase?')}
-                        </Text>
-                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
-                          {t('What did I spend on golf this year?')}
-                        </Text>
-                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
-                          {t('Am I on track for my Roth IRA?')}
-                        </Text>
-                        <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
-                          {t('Budget recommendations coming soon.')}
-                        </Text>
-                      </PlaceholderPage>
-                    }
+                    path="/can-i-afford-this"
+                    element={<CanIAffordThisPage />}
                   />
 
                   <Route
@@ -443,8 +425,6 @@ export function FinancesApp() {
                 </Routes>
               </View>
 
-              <AIFinancialCopilotPanel />
-
               <Routes>
                 <Route path="/dashboard" element={<MobileNavTabs />} />
                 <Route path="/budget" element={<MobileNavTabs />} />
@@ -456,7 +436,6 @@ export function FinancesApp() {
                   element={<MobileNavTabs />}
                 />
                 <Route path="/investments" element={<MobileNavTabs />} />
-                <Route path="/ai-copilot" element={<MobileNavTabs />} />
                 <Route path="/bank-sync" element={<MobileNavTabs />} />
                 <Route path="/rules" element={<MobileNavTabs />} />
                 <Route path="/payees" element={<MobileNavTabs />} />

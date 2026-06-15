@@ -32,10 +32,10 @@ export function PlaceholderPage({
       >
         <View
           style={{
-            background: `linear-gradient(135deg, ${theme.cardBackground} 0%, ${theme.pageBackgroundTopLeft} 100%)`,
+            backgroundColor: theme.cardBackground,
             border: '1px solid ' + theme.cardBorder,
-            borderRadius: 16,
-            padding: 24,
+            borderRadius: 12,
+            padding: 20,
             gap: 12,
           }}
         >
@@ -50,11 +50,11 @@ export function PlaceholderPage({
           >
             {eyebrow}
           </Text>
-          <Text style={{ fontSize: 28, fontWeight: 700 }}>{title}</Text>
+          <Text style={{ fontSize: 24, fontWeight: 700 }}>{title}</Text>
           <Text style={{ color: theme.pageTextLight, lineHeight: 1.5 }}>
             <Trans>
               This screen is a placeholder for the Nathaniel Budget fork and is
-              intentionally UI-only for now.
+              intentionally kept close to the existing Actual workflow.
             </Trans>
           </Text>
         </View>
