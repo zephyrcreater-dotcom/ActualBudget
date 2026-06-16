@@ -31,7 +31,26 @@ const SESSION_EXEMPT_PATHS = new Set([
   '/link',
   '/test-link-sdk',
   '/debug-headers',
+  '/link-sdk.js',
 ]);
+
+const PLAID_SDK_URL = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+let cachedSdk: { content: string; fetchedAt: number } | null = null;
+const SDK_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+async function fetchPlaidSdk(): Promise<string> {
+  const now = Date.now();
+  if (cachedSdk && now - cachedSdk.fetchedAt < SDK_CACHE_MS) {
+    return cachedSdk.content;
+  }
+  const response = await fetch(PLAID_SDK_URL);
+  if (!response.ok) {
+    throw new Error(`Plaid CDN returned ${response.status}`);
+  }
+  const content = await response.text();
+  cachedSdk = { content, fetchedAt: now };
+  return content;
+}
 app.use((req, res, next) => {
   if (SESSION_EXEMPT_PATHS.has(req.path)) {
     return next();
@@ -344,6 +363,22 @@ app.get('/link', (req, res) => {
   res.send(plaidLinkPageContent);
 });
 
+// Serve Plaid Link SDK from same origin to avoid ORB/COEP/CORS issues with the CDN.
+// Cached in memory for 1 hour so the CDN is only hit once per server restart.
+// Must be in PLAID_POPUP_PATHS (app.ts) and SESSION_EXEMPT_PATHS above.
+app.get('/link-sdk.js', async (_req, res) => {
+  try {
+    const sdk = await fetchPlaidSdk();
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(sdk);
+  } catch (err) {
+    const e = err as Error;
+    console.error('[Plaid] Failed to fetch Plaid SDK from CDN:', e.message);
+    res.status(502).send(`// Failed to fetch Plaid SDK: ${e.message}`);
+  }
+});
+
 // TEMPORARY DIAGNOSTIC: confirms which security headers this route receives.
 // Useful to verify that /plaid/link has no COEP while /plaid/debug-headers has it.
 // Remove once Plaid Link is confirmed working.
@@ -362,20 +397,94 @@ app.get('/debug-headers', (_req, res) => {
   });
 });
 
-// TEMPORARY DIAGNOSTIC: bare minimum HTML to test whether Plaid CDN script
-// loads in a context with no COEP/COOP. Should show "Plaid loaded" if headers
-// are correct. Remove once Plaid Link is confirmed working.
+// TEMPORARY DIAGNOSTIC: tests Plaid CDN loading with detailed browser diagnostics.
+// Shows exact fetch status, onerror reason, and CSP violations to pinpoint the blocker.
+// Remove once Plaid Link is confirmed working.
 app.get('/test-link-sdk', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><title>Plaid SDK Test</title></head>
+<head><meta charset="UTF-8"><title>Plaid SDK Test</title>
+<style>
+  body { font-family: monospace; padding: 16px; background: #f5f5f5; }
+  .ok { color: #2a6; }
+  .fail { color: #c33; font-weight: bold; }
+  .info { color: #555; }
+  pre { background: #fff; padding: 8px; border: 1px solid #ccc; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
 <body>
-<p id="status">Loading...</p>
-<script src="https://cdn.plaid.com/link/v3/stable/link-initialize.js"></script>
+<h3>Plaid SDK Diagnostic</h3>
+<div id="log"></div>
 <script>
-  document.getElementById('status').textContent =
-    typeof window.Plaid !== 'undefined' ? 'Plaid loaded' : 'Plaid missing (window.Plaid is undefined)';
+  var CDN_URL = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+  var log = document.getElementById('log');
+
+  function line(cls, text) {
+    var p = document.createElement('p');
+    p.className = cls;
+    p.textContent = text;
+    log.appendChild(p);
+  }
+  function pre(text) {
+    var el = document.createElement('pre');
+    el.textContent = text;
+    log.appendChild(el);
+  }
+
+  // 1. Show this page's response headers (from a fetch to self)
+  fetch(window.location.href, { method: 'HEAD' })
+    .then(function(r) {
+      var h = '';
+      r.headers.forEach(function(v, k) { h += k + ': ' + v + '\\n'; });
+      line('info', '--- Response headers for THIS page ---');
+      pre(h || '(none visible)');
+    }).catch(function(){});
+
+  // 2. Check CDN reachability with a CORS fetch (will show exact status or CORS error)
+  line('info', '--- Checking CDN with fetch(mode:cors) ---');
+  fetch(CDN_URL, { mode: 'cors' })
+    .then(function(r) {
+      line('ok', 'fetch CORS status: ' + r.status + ' content-type: ' + r.headers.get('content-type'));
+    })
+    .catch(function(e) {
+      line('fail', 'fetch CORS error: ' + e.message + ' (CORS headers missing from CDN response, or network error)');
+    });
+
+  // 3. Check CDN reachability with no-cors (opaque = reached, error = network fail)
+  line('info', '--- Checking CDN with fetch(mode:no-cors) ---');
+  fetch(CDN_URL, { mode: 'no-cors' })
+    .then(function(r) {
+      line('ok', 'fetch no-cors response type: ' + r.type + ' (opaque = CDN reached, status hidden)');
+    })
+    .catch(function(e) {
+      line('fail', 'fetch no-cors failed: ' + e.message + ' (CDN unreachable - DNS/TLS/network failure)');
+    });
+
+  // 4. CSP violation listener
+  document.addEventListener('securitypolicyviolation', function(e) {
+    line('fail', 'CSP violation: ' + e.violatedDirective + ' blocked ' + e.blockedURI);
+  });
+
+  // 5. Try loading the script from the same-origin proxy (avoids CDN ORB/COEP entirely)
+  line('info', '--- Loading Plaid SDK via /plaid/link-sdk.js (same-origin proxy) ---');
+  var script = document.createElement('script');
+  script.src = '/plaid/link-sdk.js';
+  script.onload = function() {
+    if (typeof window.Plaid !== 'undefined') {
+      line('ok', 'SUCCESS: window.Plaid loaded! type=' + typeof window.Plaid);
+    } else {
+      line('fail', 'Script onload fired but window.Plaid is undefined (SDK loaded but did not define Plaid)');
+    }
+  };
+  script.onerror = function(e) {
+    line('fail', 'Script onerror: CDN script failed to load');
+    line('fail', '  Check Network tab for cdn.plaid.com - look at status code and blocking reason');
+    line('info', '  If status=403 with application/xml: CDN is blocking this browser/IP');
+    line('info', '  If blocked by OpaqueResponseBlocking: COEP is set or MIME type wrong');
+    pre('event type: ' + (e && e.type) + '\\nevent target.src: ' + (e && e.target && e.target.src));
+  };
+  document.head.appendChild(script);
 </script>
 </body>
 </html>`);

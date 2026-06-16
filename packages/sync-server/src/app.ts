@@ -92,7 +92,11 @@ const plaidPopupCsp = [
 // Routes that serve the Plaid Link popup or test pages must not have COEP/COOP
 // because Plaid's CDN does not send Cross-Origin-Resource-Policy headers.
 // Any path added here must also be added to the session-skip list in app-plaid.ts.
-const PLAID_POPUP_PATHS = new Set(['/plaid/link', '/plaid/test-link-sdk']);
+const PLAID_POPUP_PATHS = new Set([
+  '/plaid/link',
+  '/plaid/test-link-sdk',
+  '/plaid/link-sdk.js',
+]);
 
 app.use((req, res, next) => {
   if (PLAID_POPUP_PATHS.has(req.path)) {

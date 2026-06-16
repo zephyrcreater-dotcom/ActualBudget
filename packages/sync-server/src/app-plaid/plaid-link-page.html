@@ -122,7 +122,7 @@
 
         // Step 2: load the Plaid SDK dynamically so we can detect load errors
         var script = document.createElement('script');
-        script.src = 'https://cdn.plaid.com/link/v3/stable/link-initialize.js';
+        script.src = '/plaid/link-sdk.js';
 
         script.onload = function () {
           ok('s-script');
@@ -207,14 +207,12 @@
           // Check which headers this page was served with to help diagnose the failure
           var coep = document.documentElement.getAttribute('data-coep') || '(unknown)';
           var hint =
-            'Script failed to load from https://cdn.plaid.com/link/v3/stable/link-initialize.js\n\n' +
+            'Script failed to load from /plaid/link-sdk.js (same-origin Plaid SDK proxy)\n\n' +
             'Possible causes:\n' +
-            '1. Network: cdn.plaid.com unreachable from this browser/network\n' +
-            '2. CSP: script-src does not allow https://cdn.plaid.com\n' +
-            '3. COEP: if this page has Cross-Origin-Embedder-Policy: require-corp, the CDN\n' +
-            '   script is blocked because cdn.plaid.com does not send CORP headers\n\n' +
-            'Check the browser console (F12) for the specific blocking message.\n' +
-            'Also check Network tab: inspect /plaid/link response headers for COEP/CSP.';
+            '1. Sync server could not fetch Plaid CDN — check server logs for 502 error\n' +
+            '2. CSP: script-src does not allow \'self\'\n' +
+            '3. Route /plaid/link-sdk.js not exempted from COEP in app.ts\n\n' +
+            'Check browser console (F12) and Network tab: inspect /plaid/link-sdk.js status.';
           fail('s-script', hint);
           console.error('[Plaid Link Page] script onerror event:', e);
         };
