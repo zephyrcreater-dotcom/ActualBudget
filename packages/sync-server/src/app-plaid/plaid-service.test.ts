@@ -18,13 +18,15 @@ vi.mock('plaid', () => ({
     }
     config: any;
 
-    async linkTokenCreate() {
+    async linkTokenCreate(params: any) {
+      this._lastLinkTokenCreateParams = params;
       return {
         data: {
           link_token: 'link_token_test_123',
         },
       };
     }
+    _lastLinkTokenCreateParams: any = null;
 
     async itemPublicTokenExchange() {
       return {
@@ -178,6 +180,19 @@ describe('PlaidService', () => {
       });
 
       expect(result).toBe('link_token_test_123');
+    });
+
+    it('requests only transactions product (no money-movement products)', async () => {
+      // Force a fresh client so _lastLinkTokenCreateParams is captured
+      (plaidService as any).client = null;
+      await plaidService.createLinkToken({ userId: 'user123' });
+
+      const params = (plaidService as any).client._lastLinkTokenCreateParams;
+      expect(params.products).toEqual(['transactions']);
+      const moneyMovementProducts = ['auth', 'transfer', 'payment_initiation'];
+      for (const p of moneyMovementProducts) {
+        expect(params.products).not.toContain(p);
+      }
     });
 
     it('includes redirect URI when provided', async () => {

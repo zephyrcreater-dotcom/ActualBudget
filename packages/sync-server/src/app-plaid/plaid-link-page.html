@@ -81,6 +81,47 @@
         fail('s-script', msg);
       });
 
+      // --- COOP workaround ---
+      // The main app (Vite dev server) sets Cross-Origin-Opener-Policy: same-origin.
+      // That makes window.opener === null inside this cross-origin popup, so we cannot
+      // initiate postMessage to the main app from here. Instead, the main app sends a
+      // 'plaid-init' message to us; we capture event.source (which is the main app
+      // window, still accessible even when window.opener is null) and use it for all
+      // subsequent postMessages back.
+      var mainAppWindow = null;
+      var mainAppOrigin = null;
+
+      window.addEventListener('message', function (e) {
+        if (e.data && e.data.type === 'plaid-init') {
+          console.log('[Plaid Link Page] Received plaid-init from', e.origin, '— storing event.source');
+          mainAppWindow = e.source;
+          mainAppOrigin = e.origin;
+          // Confirm the channel is open so main app stops sending init messages.
+          e.source.postMessage({ type: 'plaid-popup-ready' }, e.origin);
+          console.log('[Plaid Link Page] Sent plaid-popup-ready to main app');
+        }
+      });
+
+      function sendToMainApp(msg) {
+        // Use mainAppWindow (from event.source) when available; fall back to
+        // window.opener for environments where COOP is not set.
+        var target = mainAppWindow || window.opener;
+        var origin = mainAppOrigin || appOrigin;
+        console.log(
+          '[Plaid Link Page] sendToMainApp type=' + msg.type +
+          ' target=' + (target ? 'available' : 'NULL') +
+          ' origin=' + origin
+        );
+        if (target) {
+          target.postMessage(msg, origin);
+          return true;
+        }
+        console.error('[Plaid Link Page] No target window — message NOT sent. ' +
+          'window.opener=' + window.opener + ' mainAppWindow=' + mainAppWindow);
+        return false;
+      }
+      // --- end COOP workaround ---
+
       function ok(id) {
         var el = document.getElementById(id);
         if (el) el.className = 'step ok';
@@ -114,6 +155,9 @@
       } else {
         appOrigin = sessionStorage.getItem('plaid_app_origin') || window.location.origin;
       }
+
+      console.log('[Plaid Link Page] appOrigin:', appOrigin, 'window.opener:', window.opener);
+
       if (!linkToken) {
         fail('s-token', 'Missing link_token query parameter');
       } else {
@@ -142,19 +186,52 @@
             handler = window.Plaid.create({
               token: linkToken,
               onSuccess: function (publicToken, metadata) {
-                console.log('[Plaid Link Page] onSuccess called');
-                if (window.opener) {
-                  window.opener.postMessage(
-                    { type: 'plaid-link-success', publicToken: publicToken, metadata: metadata },
-                    appOrigin,
-                  );
-                }
-                window.close();
+                console.log('[Plaid Link Page] onSuccess fired');
+                console.log('[Plaid Link Page] publicToken present:', !!publicToken);
+                var accountCount = metadata && metadata.accounts ? metadata.accounts.length : 0;
+                console.log('[Plaid Link Page] metadata.accounts count:', accountCount);
+                console.log('[Plaid Link Page] institution:', metadata && metadata.institution ? metadata.institution.name : '(none)');
+
+                // Fast path: postMessage (works when COOP does not block cross-BCG messaging).
+                // Send BEFORE the relay fetch so it arrives while popup is still open.
+                var target = mainAppWindow || window.opener;
+                console.log('[Plaid Link Page] sending plaid-link-success to main app, postMessage target available:', !!target);
+                sendToMainApp({
+                  type: 'plaid-link-success',
+                  publicToken: publicToken,
+                  metadata: metadata,
+                });
+
+                // Reliable path: server-side relay. The popup calls /popup-complete (same-origin,
+                // session-exempt, authenticated by linkToken). The main app polls /popup-result.
+                // window.close() is called AFTER the fetch resolves so the result is stored first.
+                var institutionId = metadata && metadata.institution ? metadata.institution.institution_id : undefined;
+                var institutionName = metadata && metadata.institution ? metadata.institution.name : undefined;
+                console.log('[Plaid Link Page] sending /plaid/popup-complete for server-side relay');
+                fetch('/plaid/popup-complete', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    linkToken: linkToken,
+                    publicToken: publicToken,
+                    institutionId: institutionId,
+                    institutionName: institutionName,
+                  }),
+                })
+                  .then(function (r) { return r.json(); })
+                  .then(function (data) {
+                    console.log('[Plaid Link Page] /plaid/popup-complete response status:', data.status);
+                    // Small delay so in-flight postMessage can be delivered before close.
+                    setTimeout(function () { window.close(); }, 200);
+                  })
+                  .catch(function (e) {
+                    console.error('[Plaid Link Page] /plaid/popup-complete failed:', e.message);
+                    setTimeout(function () { window.close(); }, 200);
+                  });
               },
               onExit: function (err, metadata) {
-                console.log('[Plaid Link Page] onExit called, err:', err, 'metadata:', metadata);
+                console.log('[Plaid Link Page] onExit called, err:', err);
                 if (err) {
-                  // Display inline so CSP/iframe failures are visible in the popup
                   var errMsg =
                     (err.display_message || err.error_message || err.error_type) ||
                     JSON.stringify(err);
@@ -162,23 +239,13 @@
                     's-open',
                     'Plaid onExit error: ' + errMsg + '\n\nmetadata: ' + JSON.stringify(metadata, null, 2),
                   );
-                  if (window.opener) {
-                    window.opener.postMessage(
-                      {
-                        type: 'plaid-link-error',
-                        error: errMsg,
-                        metadata: metadata,
-                      },
-                      appOrigin,
-                    );
-                  }
+                  sendToMainApp({
+                    type: 'plaid-link-error',
+                    error: errMsg,
+                    metadata: metadata,
+                  });
                 } else {
-                  if (window.opener) {
-                    window.opener.postMessage(
-                      { type: 'plaid-link-exit', metadata: metadata },
-                      appOrigin,
-                    );
-                  }
+                  sendToMainApp({ type: 'plaid-link-exit', metadata: metadata });
                   window.close();
                 }
               },
@@ -204,8 +271,6 @@
         };
 
         script.onerror = function (e) {
-          // Check which headers this page was served with to help diagnose the failure
-          var coep = document.documentElement.getAttribute('data-coep') || '(unknown)';
           var hint =
             'Script failed to load from /plaid/link-sdk.js (same-origin Plaid SDK proxy)\n\n' +
             'Possible causes:\n' +

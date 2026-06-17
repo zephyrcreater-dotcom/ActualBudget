@@ -72,6 +72,70 @@ async function updateAccountBalance(id: AccountEntity['id'], balance: number) {
   await db.update('accounts', { id, balance_current: balance });
 }
 
+/**
+ * For Plaid accounts, adjust the starting-balance transaction so that
+ * sum(all transactions) == targetBalance (the current Plaid balance).
+ *
+ * This keeps the displayed account balance accurate even when there are no
+ * new transactions to import.  Only the starting-balance transaction is
+ * touched; user-edited payees, categories, and reconciled transactions are
+ * never modified.
+ */
+async function adjustPlaidStartingBalance(
+  accountId: string,
+  targetBalance: number,
+) {
+  // Find the starting-balance transaction (there should be exactly one).
+  const startingTx = await db.first<{
+    id: string;
+    amount: number;
+    reconciled: number;
+  }>(
+    `SELECT id, amount, reconciled FROM transactions
+     WHERE acct = ? AND starting_balance_flag = 1 AND tombstone = 0
+     LIMIT 1`,
+    [accountId],
+  );
+
+  if (!startingTx) {
+    logger.log(
+      '[Plaid] adjustPlaidStartingBalance: no starting-balance transaction found for account',
+      accountId,
+    );
+    return;
+  }
+
+  // Don't touch a transaction the user has already reconciled.
+  if (startingTx.reconciled) {
+    logger.log(
+      '[Plaid] adjustPlaidStartingBalance: starting-balance tx is reconciled — skipping',
+    );
+    return;
+  }
+
+  // Sum of every OTHER transaction (all except the starting-balance tx).
+  const otherSumRow = await db.first<{ s: number }>(
+    `SELECT sum(amount) as s FROM transactions
+     WHERE acct = ? AND starting_balance_flag = 0 AND isParent = 0 AND tombstone = 0`,
+    [accountId],
+  );
+  const otherSum = otherSumRow?.s ?? 0;
+
+  // The starting balance we need so that: startingBalance + otherSum == targetBalance.
+  const newStartingAmount = targetBalance - otherSum;
+
+  logger.log(
+    `[Plaid] adjustPlaidStartingBalance — account: ${accountId}, targetBalance: ${targetBalance}, otherSum: ${otherSum}, oldStarting: ${startingTx.amount}, newStarting: ${newStartingAmount}`,
+  );
+
+  if (newStartingAmount === startingTx.amount) return; // already correct
+
+  await db.update('transactions', {
+    id: startingTx.id,
+    amount: newStartingAmount,
+  });
+}
+
 async function getAccountOldestTransaction(id): Promise<TransactionEntity> {
   return (
     await aqlQuery(
@@ -1198,6 +1262,14 @@ async function processBankSyncDownload(
 
     if (currentBalance != null) {
       await updateAccountBalance(id, currentBalance);
+
+      // For Plaid accounts, also adjust the starting-balance transaction so
+      // the displayed account balance matches the Plaid current balance.
+      // This is necessary when there are no new transactions to import —
+      // otherwise the sum-of-transactions balance would stay stale.
+      if (acctRow.account_sync_source === 'plaid') {
+        await adjustPlaidStartingBalance(id, currentBalance);
+      }
     }
 
     return result;

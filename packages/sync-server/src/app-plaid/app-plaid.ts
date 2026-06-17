@@ -20,18 +20,49 @@ const linkTokenStore = new Map<
 
 const LINK_TOKEN_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutes
 
+// Server-side relay for post-Plaid-Link completion.
+// The popup cannot postMessage back to the main app when COOP=same-origin is set
+// on the Vite dev server (cross-BCG postMessage is dropped silently). Instead the
+// popup calls /popup-complete (session-exempt, linkToken-authenticated) and the
+// main app polls /popup-result (session-authenticated). The publicToken is held in
+// memory only until the main app retrieves it (single-use, 5-minute TTL).
+const pendingPopupCompletions = new Map<
+  string,
+  {
+    publicToken: string;
+    institutionId?: string;
+    institutionName?: string;
+    timestamp: number;
+  }
+>();
+
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [key, val] of pendingPopupCompletions) {
+      if (now - val.timestamp > 5 * 60 * 1000) {
+        pendingPopupCompletions.delete(key);
+      }
+    }
+  },
+  5 * 60 * 1000,
+);
+
 const app = express();
 
 export { app as handlers };
 app.use(express.json());
 app.use(requestLoggerMiddleware);
 
-// Skip session validation for unauthenticated Plaid popup / diagnostic routes
+// Skip session validation for unauthenticated Plaid popup / diagnostic routes.
+// /popup-complete is called by the popup page (no session cookie); it uses
+// the linkToken as its authentication credential instead.
 const SESSION_EXEMPT_PATHS = new Set([
   '/link',
   '/test-link-sdk',
   '/debug-headers',
   '/link-sdk.js',
+  '/popup-complete',
 ]);
 
 const PLAID_SDK_URL = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
@@ -228,6 +259,10 @@ app.post(
   '/exchange-public-token',
   handleError(async (req, res) => {
     const { publicToken, institutionId, institutionName } = req.body || {};
+    console.log(
+      '[Plaid] POST /exchange-public-token hit, publicToken present:',
+      !!publicToken,
+    );
 
     if (!publicToken) {
       return res.status(400).send({
@@ -237,16 +272,20 @@ app.post(
       });
     }
 
+    const t0 = Date.now();
     const result = await plaidService.exchangePublicToken({
       publicToken,
       institutionId,
       institutionName,
     });
+    console.log(
+      '[Plaid] /exchange-public-token OK in',
+      Date.now() - t0,
+      'ms, itemId:',
+      result.itemId,
+    );
 
-    res.send({
-      status: 'ok',
-      data: result,
-    });
+    res.send({ status: 'ok', data: result });
   }),
 );
 
@@ -254,6 +293,10 @@ app.post(
   '/get-plaid-accounts',
   handleError(async (req, res) => {
     const { itemId } = req.body || {};
+    console.log(
+      '[Plaid] POST /get-plaid-accounts hit, itemId:',
+      itemId ?? '(missing)',
+    );
 
     if (!itemId) {
       return res.status(400).send({
@@ -263,14 +306,16 @@ app.post(
       });
     }
 
+    const t0 = Date.now();
     const accounts = await plaidService.getPlaidAccounts(itemId);
+    console.log(
+      '[Plaid] /get-plaid-accounts OK in',
+      Date.now() - t0,
+      'ms, accounts:',
+      accounts.length,
+    );
 
-    res.send({
-      status: 'ok',
-      data: {
-        accounts,
-      },
-    });
+    res.send({ status: 'ok', data: { accounts } });
   }),
 );
 
@@ -315,6 +360,108 @@ app.post(
       status: 'ok',
       data: result,
     });
+  }),
+);
+
+// Called by the popup (session-exempt) after Plaid onSuccess. The linkToken
+// proves the call is from a legitimate Plaid flow started by this server.
+// publicToken is stored transiently for the main app to retrieve via /popup-result.
+app.post(
+  '/popup-complete',
+  handleError(async (req, res) => {
+    const { linkToken, publicToken, institutionId, institutionName } =
+      req.body || {};
+
+    if (!linkToken || !publicToken) {
+      return res
+        .status(400)
+        .send({ status: 'error', reason: 'missing-fields' });
+    }
+
+    const tokenData = linkTokenStore.get(linkToken);
+    if (!tokenData || Date.now() > tokenData.expiresAt) {
+      linkTokenStore.delete(linkToken);
+      return res.status(401).send({
+        status: 'error',
+        reason: 'unauthorized',
+        details: 'invalid-or-expired-link-token',
+      });
+    }
+
+    pendingPopupCompletions.set(linkToken, {
+      publicToken,
+      institutionId: institutionId || undefined,
+      institutionName: institutionName || undefined,
+      timestamp: Date.now(),
+    });
+    console.log(
+      '[Plaid] /popup-complete: stored relay for linkToken (first 20):',
+      linkToken.substring(0, 20),
+    );
+
+    res.send({ status: 'ok' });
+  }),
+);
+
+// Polled by the authenticated main app to retrieve the popup result.
+// Returns { pending: true } while waiting, or the publicToken data once available.
+// The entry is deleted after retrieval (single-use).
+app.post(
+  '/popup-result',
+  handleError(async (req, res) => {
+    const { linkToken } = req.body || {};
+    if (!linkToken) {
+      return res
+        .status(400)
+        .send({ status: 'error', reason: 'missing-link-token' });
+    }
+
+    const completion = pendingPopupCompletions.get(linkToken);
+    if (!completion) {
+      return res.send({ status: 'ok', data: { pending: true } });
+    }
+
+    pendingPopupCompletions.delete(linkToken);
+    console.log(
+      '[Plaid] /popup-result: returning relay result for linkToken (first 20):',
+      linkToken.substring(0, 20),
+    );
+
+    return res.send({
+      status: 'ok',
+      data: {
+        pending: false,
+        publicToken: completion.publicToken,
+        institutionId: completion.institutionId,
+        institutionName: completion.institutionName,
+      },
+    });
+  }),
+);
+
+// Returns all stored Plaid items (no access_token) for debugging connection-limit issues.
+app.get(
+  '/debug/items',
+  handleError(async (_req, res) => {
+    const items = plaidService.listItems();
+    console.log('[Plaid] /debug/items: returning', items.length, 'item(s)');
+    res.send({ status: 'ok', data: { items, totalItems: items.length } });
+  }),
+);
+
+// Calls Plaid itemRemove and deletes local DB records.
+// Use this to clean up items accumulated during testing.
+app.post(
+  '/remove-item',
+  handleError(async (req, res) => {
+    const { itemId } = req.body || {};
+    if (!itemId) {
+      return res
+        .status(400)
+        .send({ status: 'error', reason: 'missing-item-id' });
+    }
+    await plaidService.removeItem(itemId);
+    res.send({ status: 'ok', data: { removed: itemId } });
   }),
 );
 

@@ -30,39 +30,90 @@ type PlaidLinkTokenResponse = {
   };
 };
 
+type PlaidPopupResultResponse = {
+  status: string;
+  data: {
+    pending: boolean;
+    publicToken?: string;
+    institutionId?: string;
+    institutionName?: string;
+  };
+};
+
 export async function callSyncServer(
   serverURL: string,
   endpoint: string,
   body?: Record<string, unknown>,
+  timeoutMs = 35_000,
 ): Promise<unknown> {
   if (!serverURL) {
     throw new Error(t('Sync server not configured'));
   }
 
-  // Get the session token for sync server authentication
   const userToken = await asyncStorage.getItem('user-token');
   if (!userToken) {
     throw new Error(t('Not authenticated with sync server'));
   }
 
-  const response = await fetch(`${serverURL}/plaid${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify({ token: userToken, ...body }),
-  });
+  console.log('[Plaid] callSyncServer →', endpoint);
 
-  const data = await response.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(`${serverURL}/plaid${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ token: userToken, ...body }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg =
+      err instanceof Error && err.name === 'AbortError'
+        ? `Request to ${endpoint} timed out after ${timeoutMs / 1000}s`
+        : `Network error calling ${endpoint}: ${err instanceof Error ? err.message : String(err)}`;
+    console.error('[Plaid] callSyncServer FAILED:', msg);
+    throw new Error(msg);
+  }
+  clearTimeout(timer);
+
+  console.log('[Plaid] callSyncServer ←', endpoint, 'HTTP', response.status);
+
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    const msg = `${endpoint} returned HTTP ${response.status} with non-JSON body`;
+    console.error('[Plaid] callSyncServer parse error:', msg);
+    throw new Error(msg);
+  }
 
   if (!response.ok || data.status === 'error') {
-    throw new Error(
-      data.data?.details ||
-        data.reason ||
-        data.error_message ||
-        t('Plaid API error'),
+    // handleError sends { status:'error', reason:'...', details:'...' } at top level.
+    const detail = data.details || data.data?.details;
+    const reason =
+      data.reason && data.reason !== 'plaid-error' ? data.reason : null;
+    const msg =
+      detail ||
+      reason ||
+      data.error_message ||
+      `Plaid API error (HTTP ${response.status})`;
+    console.error(
+      '[Plaid] callSyncServer error —',
+      endpoint,
+      '| HTTP',
+      response.status,
+      '| reason:',
+      data.reason,
+      '| details:',
+      detail,
+      '| full body:',
+      JSON.stringify(data),
     );
+    throw new Error(msg);
   }
 
   return data;
@@ -158,6 +209,21 @@ export async function getPlaidAccounts(
   })) as PlaidAccountsResponse;
 
   return resp.data.accounts || [];
+}
+
+export async function checkPopupResult(
+  serverURL: string,
+  linkToken: string,
+): Promise<{
+  pending: boolean;
+  publicToken?: string;
+  institutionId?: string;
+  institutionName?: string;
+}> {
+  const resp = (await callSyncServer(serverURL, '/popup-result', {
+    linkToken,
+  })) as PlaidPopupResultResponse;
+  return resp.data;
 }
 
 export async function savePlaidCredentials(

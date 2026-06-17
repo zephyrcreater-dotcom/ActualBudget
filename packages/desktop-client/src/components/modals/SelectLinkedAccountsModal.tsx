@@ -227,7 +227,26 @@ export function SelectLinkedAccountsModal({
   );
   const [customStartingDates, setCustomStartingDates] = useState<
     Record<string, StartingBalanceInfo>
-  >({});
+  >(() => {
+    // Pre-populate Plaid account balances so the starting balance field is
+    // correct by default instead of showing $0.
+    // Plaid returns credit card balances as positive debt — negate them so
+    // Actual shows the account as negative (you owe money).
+    if (propsWithSortedExternalAccounts.syncSource !== 'plaid') return {};
+    return Object.fromEntries(
+      propsWithSortedExternalAccounts.externalAccounts.map(account => {
+        const balanceDollars = account.balance ?? 0;
+        const isDebt = account.type === 'credit' || account.type === 'loan';
+        // Convert dollars → integer cents, flip sign for debt accounts
+        const amountCents =
+          Math.round(balanceDollars * 100) * (isDebt ? -1 : 1);
+        return [
+          account.account_id,
+          { date: subDays(currentDay(), 89), amount: amountCents },
+        ];
+      }),
+    );
+  });
   const { addOnBudgetAccountOption, addOffBudgetAccountOption } =
     useAddBudgetAccountOptions();
 

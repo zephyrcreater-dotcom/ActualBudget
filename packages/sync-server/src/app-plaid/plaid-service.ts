@@ -14,13 +14,14 @@ type PlaidItem = {
 };
 
 type PlaidAccount = {
-  plaidAccountId: string;
+  account_id: string;
   itemId: string;
   mask: string | null;
   name: string;
-  officialName: string;
-  subtype: string;
+  official_name?: string;
+  subtype?: string;
   type: string;
+  balance: number;
 };
 
 type LinkTokenRequest = {
@@ -70,6 +71,10 @@ type NormalizedPlaidTransaction = {
     currency: string;
   };
   payeeName: string;
+  /** Raw bank/Plaid transaction name (e.g. "AMAZON MKTPLACE PMTS AMZN.COM/BILL WA"). */
+  imported_payee: string;
+  /** Raw description stored as transaction notes when a cleaner merchant name is available. */
+  notes?: string;
   date: string;
   bookingDate?: string;
   booked: boolean;
@@ -103,6 +108,8 @@ class PlaidServiceImpl {
           'PLAID-CLIENT-ID': clientId,
           'PLAID-SECRET': secret,
         },
+        // Prevent axios from hanging indefinitely on slow/unresponsive Plaid API.
+        timeout: 30_000,
       },
     });
 
@@ -157,7 +164,7 @@ class PlaidServiceImpl {
         client_name: 'Nathaniel Budget',
         language: 'en',
         country_codes: ['US'] as any,
-        products: ['auth'] as any,
+        products: ['transactions'] as any,
         redirect_uri: request.redirectUri,
       });
 
@@ -187,82 +194,112 @@ class PlaidServiceImpl {
     }
 
     const { publicToken, institutionId, institutionName } = request;
+    console.log('[Plaid] exchangePublicToken: calling itemPublicTokenExchange');
 
-    debug(`Exchanging public token for Plaid access token`);
+    const client = this.initializeClient();
 
+    let itemId: string;
+    let accessToken: string;
     try {
-      const client = this.initializeClient();
-
       const response = await client.itemPublicTokenExchange({
         public_token: publicToken,
       });
-
-      const itemId = response.data.item_id;
-      const accessToken = response.data.access_token;
-
-      debug(`Received access token for item ${itemId}`);
-
-      // Store the item and access token securely in the database
-      const db = getAccountDb();
-      db.mutate(
-        `INSERT INTO plaid_items (item_id, access_token, institution_id, institution_name, status)
-         VALUES (?, ?, ?, ?, 'active')`,
-        [itemId, accessToken, institutionId || null, institutionName || null],
-      );
-
-      debug(`Stored Plaid item: ${itemId}`);
-
-      return {
-        itemId,
-        institutionId: institutionId || '',
-        institutionName: institutionName || 'Unknown Institution',
-        status: 'active',
-      };
+      itemId = response.data.item_id;
+      accessToken = response.data.access_token;
+      console.log('[Plaid] exchangePublicToken: OK, item_id=', itemId);
     } catch (error) {
       const err = error as any;
-      debug(
-        `Failed to exchange public token: ${err?.response?.data?.error_message || err?.message || String(error)}`,
+      const msg =
+        err?.response?.data?.error_message ||
+        err?.response?.data?.error_code ||
+        err?.message ||
+        String(error);
+      console.error(
+        '[Plaid] exchangePublicToken: itemPublicTokenExchange FAILED:',
+        msg,
       );
-      throw new Error(
-        `Failed to exchange public token: ${err?.response?.data?.error_message || err?.message || 'Unknown error'}`,
-      );
+      // Re-throw as-is so handleError can inspect err.response.data for Plaid fields.
+      throw error;
     }
+
+    const db = getAccountDb();
+    // INSERT OR REPLACE so re-linking the same institution (same item_id) doesn't
+    // throw a UNIQUE constraint error during repeated testing.
+    db.mutate(
+      `INSERT OR REPLACE INTO plaid_items
+         (item_id, access_token, institution_id, institution_name, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [itemId, accessToken, institutionId || null, institutionName || null],
+    );
+    console.log(
+      '[Plaid] exchangePublicToken: item saved to DB, item_id=',
+      itemId,
+    );
+
+    return {
+      itemId,
+      institutionId: institutionId || '',
+      institutionName: institutionName || 'Unknown Institution',
+      status: 'active',
+    };
   }
 
   /**
    * Fetch accounts for a Plaid item
    */
   async getPlaidAccounts(itemId: string): Promise<PlaidAccount[]> {
-    debug(`Fetching Plaid accounts for item: ${itemId}`);
+    console.log('[Plaid] getPlaidAccounts: itemId=', itemId);
 
     const db = getAccountDb();
 
-    // Verify the item exists and get the access token
     const item = db.first(
       `SELECT item_id, access_token FROM plaid_items WHERE item_id = ?`,
       [itemId],
     ) as { item_id: string; access_token: string } | null;
 
     if (!item) {
+      console.error('[Plaid] getPlaidAccounts: item not found in DB:', itemId);
       throw new Error(`Plaid item not found: ${itemId}`);
     }
+    console.log(
+      '[Plaid] getPlaidAccounts: item found in DB, calling accountsGet',
+    );
 
+    const client = this.initializeClient();
+
+    let accounts: any[];
     try {
-      const client = this.initializeClient();
-
-      // Fetch accounts from Plaid using the stored access token
+      const t0 = Date.now();
       const response = await client.accountsGet({
         access_token: item.access_token,
       });
-
-      const accounts = response.data.accounts;
-      const accountsData = response.data.item;
-
-      debug(
-        `Fetched ${accounts.length} accounts from Plaid for item ${itemId}`,
+      accounts = response.data.accounts;
+      console.log(
+        '[Plaid] getPlaidAccounts: accountsGet OK in',
+        Date.now() - t0,
+        'ms, accounts=',
+        accounts.length,
       );
+    } catch (error) {
+      const err = error as any;
+      const code = err?.response?.data?.error_code;
+      const msg =
+        err?.response?.data?.error_message ||
+        code ||
+        err?.message ||
+        String(error);
+      console.error(
+        '[Plaid] getPlaidAccounts: accountsGet FAILED | code:',
+        code,
+        '| msg:',
+        msg,
+      );
+      // Re-throw original so handleError can extract err.response.data.
+      throw error;
+    }
 
-      // Store or update account metadata in the database
+    // Store account metadata; separate try so a DB failure is clearly distinct.
+    try {
       for (const account of accounts) {
         db.mutate(
           `INSERT OR REPLACE INTO plaid_accounts
@@ -279,28 +316,30 @@ class PlaidServiceImpl {
           ],
         );
       }
-
-      debug(`Stored ${accounts.length} account(s) for item ${itemId}`);
-
-      // Return normalized account data (without access token)
-      return accounts.map(account => ({
-        plaidAccountId: account.account_id,
-        itemId,
-        mask: account.mask,
-        name: account.name,
-        officialName: account.official_name || '',
-        subtype: account.subtype || '',
-        type: account.type,
-      }));
-    } catch (error) {
-      const err = error as any;
-      debug(
-        `Failed to fetch accounts: ${err?.response?.data?.error_message || err?.message || String(error)}`,
+      console.log(
+        '[Plaid] getPlaidAccounts: stored',
+        accounts.length,
+        'account(s) in DB',
       );
-      throw new Error(
-        `Failed to fetch accounts: ${err?.response?.data?.error_message || err?.message || 'Unknown error'}`,
+    } catch (dbErr: any) {
+      console.error(
+        '[Plaid] getPlaidAccounts: DB write FAILED:',
+        dbErr?.message,
       );
+      throw dbErr;
     }
+
+    // Field names match SyncServerPlaidAccount; access_token never returned.
+    return accounts.map((account: any) => ({
+      account_id: account.account_id,
+      itemId,
+      mask: account.mask,
+      name: account.name,
+      official_name: account.official_name || undefined,
+      subtype: account.subtype || undefined,
+      type: account.type,
+      balance: account.balances?.current ?? 0,
+    }));
   }
 
   /**
@@ -329,12 +368,13 @@ class PlaidServiceImpl {
 
     // Verify the item exists and get the access token
     const item = db.first(
-      `SELECT item_id, access_token, last_cursor FROM plaid_items WHERE item_id = ?`,
+      `SELECT item_id, access_token, last_cursor, descriptions_backfilled FROM plaid_items WHERE item_id = ?`,
       [itemId],
     ) as {
       item_id: string;
       access_token: string;
       last_cursor?: string;
+      descriptions_backfilled?: number;
     } | null;
 
     if (!item) {
@@ -344,8 +384,25 @@ class PlaidServiceImpl {
     try {
       const client = this.initializeClient();
       const allTransactions: NormalizedPlaidTransaction[] = [];
+      // If descriptions have never been backfilled, reset cursor to force a full
+      // re-fetch. The reconcile layer deduplicates by imported_id, so no
+      // transactions will be duplicated — existing ones get their imported_payee
+      // (raw bank description) updated.
+      if (!item.descriptions_backfilled) {
+        console.log(
+          `[Plaid] descriptions_backfilled=0 for item ${itemId} — resetting cursor to backfill raw descriptions`,
+        );
+        db.mutate(
+          `UPDATE plaid_items SET last_cursor = NULL, descriptions_backfilled = 1 WHERE item_id = ?`,
+          [itemId],
+        );
+        item.last_cursor = undefined;
+      }
+
       let cursor = item.last_cursor || undefined;
       let hasMore = true;
+      // Capture the most recent accounts array (balances don't change per page)
+      let lastAccounts: any[] = [];
 
       // Fetch all transactions using cursor-based pagination
       while (hasMore) {
@@ -357,7 +414,12 @@ class PlaidServiceImpl {
           },
         })) as any;
 
-        const plaidTransactions = response.data.transactions as any[];
+        // transactionsSync returns `added` + `modified` arrays (not `transactions`)
+        // and `next_cursor` (not `cursor`).
+        const added = (response.data.added || []) as any[];
+        const modified = (response.data.modified || []) as any[];
+        const plaidTransactions = [...added, ...modified];
+        lastAccounts = (response.data.accounts || []) as any[];
 
         debug(
           `Fetched ${plaidTransactions.length} transactions from Plaid for item ${itemId}`,
@@ -370,19 +432,11 @@ class PlaidServiceImpl {
             continue;
           }
 
-          // Handle removed transactions (transaction_id in removed array)
-          if (
-            transaction.transaction_type === 'TRANSFER' &&
-            transaction.removed
-          ) {
-            continue;
-          }
-
           const normalized = this.normalizePlaidTransaction(transaction);
           allTransactions.push(normalized);
         }
 
-        cursor = response.data.cursor;
+        cursor = response.data.next_cursor;
         hasMore = response.data.has_more;
       }
 
@@ -394,11 +448,28 @@ class PlaidServiceImpl {
 
       debug(`Successfully fetched ${allTransactions.length} transactions`);
 
-      // Return in format expected by loot-core
+      // Extract current balance for the requested account.
+      // transactionsSync includes an `accounts` array with up-to-date balances.
+      // Plaid convention: credit card `current` is positive = amount owed (debt).
+      // Actual convention: debt is negative, so we negate credit/loan balances.
+      let startingBalance = 0;
+      const acctData = accountId
+        ? lastAccounts.find((a: any) => a.account_id === accountId)
+        : lastAccounts[0];
+      if (acctData) {
+        const currentDollars: number = acctData.balances?.current ?? 0;
+        const isDebt = acctData.type === 'credit' || acctData.type === 'loan';
+        // Convert to cents (integer) and flip sign for debt accounts
+        startingBalance = Math.round(currentDollars * 100) * (isDebt ? -1 : 1);
+        console.log(
+          `[Plaid] getTransactions balance — account: ${accountId}, type: ${acctData.type}, current: ${currentDollars}, startingBalance (cents): ${startingBalance}`,
+        );
+      }
+
       return {
         transactions: allTransactions,
         accountBalance: [],
-        startingBalance: 0,
+        startingBalance,
       };
     } catch (error) {
       const err = error as any;
@@ -423,6 +494,25 @@ class PlaidServiceImpl {
     // So we need to negate the amount
     const actualAmount = -plaidTrans.amount;
 
+    // Use the clean merchant name as the primary payee when Plaid provides one,
+    // otherwise fall back to the raw transaction name.
+    const rawName: string = plaidTrans.name || 'Unknown';
+    const merchantName: string | undefined =
+      plaidTrans.merchant_name || plaidTrans.counterparties?.[0]?.name;
+    const payeeName = merchantName || rawName;
+
+    // Store the raw bank description as imported_payee so it's always preserved.
+    // When a cleaner merchant name is used as the payee, also copy it into notes
+    // so users can see the original description without opening the import tooltip.
+    // TODO: add a per-account toggle "Show original bank descriptions" that controls
+    //       whether notes are auto-populated from Plaid's raw transaction name.
+    const notes =
+      merchantName && merchantName !== rawName ? rawName : undefined;
+
+    console.log(
+      `[Plaid] normalizePlaidTransaction — id: ${plaidTrans.transaction_id}, merchant_name: ${plaidTrans.merchant_name ?? '(none)'}, name: ${rawName}, payeeName: ${payeeName}, imported_payee: ${rawName}, notes: ${notes ?? '(none)'}`,
+    );
+
     return {
       transactionId: plaidTrans.transaction_id,
       amount: String(actualAmount),
@@ -430,11 +520,9 @@ class PlaidServiceImpl {
         amount: String(actualAmount),
         currency: plaidTrans.iso_currency_code || 'USD',
       },
-      payeeName:
-        plaidTrans.merchant_name ||
-        plaidTrans.name ||
-        plaidTrans.counterparties?.[0]?.name ||
-        'Unknown',
+      payeeName,
+      imported_payee: rawName,
+      notes,
       date: plaidTrans.date,
       bookingDate: plaidTrans.date,
       booked: !plaidTrans.pending,
@@ -520,6 +608,77 @@ class PlaidServiceImpl {
        WHERE item_id = ?`,
       [status, errorCode || null, errorType || null, itemId],
     );
+  }
+
+  listItems(): Array<{
+    itemId: string;
+    institutionId: string | null;
+    institutionName: string | null;
+    status: string;
+    createdAt: string;
+    accountCount: number;
+  }> {
+    const db = getAccountDb();
+    return (
+      db.all(
+        `SELECT i.item_id, i.institution_id, i.institution_name, i.status, i.created_at,
+                COUNT(a.plaid_account_id) AS account_count
+         FROM plaid_items i
+         LEFT JOIN plaid_accounts a ON a.item_id = i.item_id
+         GROUP BY i.item_id
+         ORDER BY i.created_at DESC`,
+        [],
+      ) as Array<{
+        item_id: string;
+        institution_id: string | null;
+        institution_name: string | null;
+        status: string;
+        created_at: string;
+        account_count: number;
+      }>
+    ).map(row => ({
+      itemId: row.item_id,
+      institutionId: row.institution_id,
+      institutionName: row.institution_name,
+      status: row.status,
+      createdAt: row.created_at,
+      accountCount: row.account_count,
+    }));
+  }
+
+  async removeItem(itemId: string): Promise<void> {
+    const db = getAccountDb();
+
+    const item = db.first(
+      `SELECT access_token FROM plaid_items WHERE item_id = ?`,
+      [itemId],
+    ) as { access_token: string } | null;
+
+    if (!item) {
+      throw new Error(`Plaid item not found: ${itemId}`);
+    }
+
+    const client = this.initializeClient();
+
+    try {
+      await client.itemRemove({ access_token: item.access_token });
+      console.log('[Plaid] itemRemove: Plaid confirmed removal of', itemId);
+    } catch (err: any) {
+      // ITEM_NOT_FOUND means Plaid already deleted it — treat as success.
+      const code = err?.response?.data?.error_code;
+      if (code !== 'ITEM_NOT_FOUND') {
+        throw new Error(
+          `Plaid itemRemove failed: ${err?.response?.data?.error_message || err?.message || String(err)}`,
+        );
+      }
+      console.warn(
+        '[Plaid] itemRemove: item not found on Plaid side, removing locally anyway',
+      );
+    }
+
+    // Cascade delete: plaid_accounts FK references plaid_items with ON DELETE CASCADE.
+    db.mutate(`DELETE FROM plaid_items WHERE item_id = ?`, [itemId]);
+    console.log('[Plaid] removeItem: deleted local records for', itemId);
   }
 }
 

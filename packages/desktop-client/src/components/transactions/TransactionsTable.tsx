@@ -666,16 +666,14 @@ function PayeeCell({
         return displayPayee;
       }}
       unexposedContent={props => {
-        const payeeName = (
-          <UnexposedCellContent
-            {...props}
-            style={
-              importedPayee
-                ? { borderBottom: `1px dashed ${theme.pageTextSubdued}` }
-                : {}
-            }
-          />
-        );
+        // Show the raw bank description as a visible secondary line when the
+        // displayed payee name was cleaned up (e.g. "Amazon" from
+        // "AMAZON MKTPLACE PMTS AMZN.COM/BILL WA"). When they're the same
+        // there's nothing useful to surface.
+        const showRawDescription =
+          importedPayee && importedPayee !== displayPayee;
+
+        const payeeName = <UnexposedCellContent {...props} />;
 
         return (
           <>
@@ -688,34 +686,26 @@ function PayeeCell({
             <div
               style={{
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
                 display: 'flex',
-                alignItems: 'center',
+                flexDirection: showRawDescription ? 'column' : 'row',
+                alignItems: showRawDescription ? 'flex-start' : 'center',
+                flex: 1,
               }}
             >
-              {importedPayee ? (
-                <Tooltip
-                  content={
-                    <View style={{ padding: 10 }}>
-                      <Text style={{ fontWeight: 'bold' }}>
-                        <Trans>Imported Payee</Trans>
-                      </Text>
-                      <Text style={{ fontWeight: 'normal' }}>
-                        {importedPayee}
-                      </Text>
-                    </View>
-                  }
+              {payeeName}
+              {showRawDescription && (
+                <Text
                   style={{
-                    ...styles.tooltip,
-                    borderRadius: '0px 5px 5px 0px',
+                    fontSize: 11,
+                    color: theme.pageTextSubdued,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    width: '100%',
                   }}
-                  placement="bottom"
-                  triggerProps={{ delay: 750 }}
                 >
-                  {payeeName}
-                </Tooltip>
-              ) : (
-                payeeName
+                  {importedPayee}
+                </Text>
               )}
             </div>
           </>
