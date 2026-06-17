@@ -11,10 +11,41 @@ import {
   amountToInteger,
   currencyToAmount,
 } from '@actual-app/core/shared/util';
-import type { AccountEntity } from '@actual-app/core/types/models';
+import type {
+  AccountEntity,
+  TransactionEntity,
+} from '@actual-app/core/types/models';
 import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 // @ts-strict-ignore
 import { isValid as isDateValid, parse as parseDate } from 'date-fns';
+
+export type PreBudgetTransactionFilterMode = 'all' | 'hide' | 'only';
+
+export function parsePreBudgetTransactionFilterMode(
+  mode?: string | null,
+): PreBudgetTransactionFilterMode {
+  return mode === 'hide' || mode === 'only' ? mode : 'all';
+}
+
+export function isPreBudgetTransaction(
+  transaction: Pick<TransactionEntity, 'date'>,
+  budgetStartDate?: string | null,
+) {
+  return !!budgetStartDate && transaction.date < budgetStartDate;
+}
+
+function getPreBudgetTransactionFilter(
+  budgetStartDate?: string | null,
+  mode: PreBudgetTransactionFilterMode = 'all',
+) {
+  if (!budgetStartDate || mode === 'all') {
+    return null;
+  }
+
+  return mode === 'only'
+    ? { date: { $lt: budgetStartDate } }
+    : { date: { $gte: budgetStartDate } };
+}
 
 export function accountFilter(
   accountId?:
@@ -69,12 +100,27 @@ export function transactions(
     | 'offbudget'
     | 'closed'
     | 'uncategorized',
+  {
+    budgetStartDate,
+    preBudgetMode = 'all',
+  }: {
+    budgetStartDate?: string | null;
+    preBudgetMode?: PreBudgetTransactionFilterMode;
+  } = {},
 ) {
   let query = q('transactions').options({ splits: 'grouped' });
 
   const filter = accountFilter(accountId);
   if (filter) {
     query = query.filter(filter);
+  }
+
+  const preBudgetFilter = getPreBudgetTransactionFilter(
+    budgetStartDate,
+    preBudgetMode,
+  );
+  if (preBudgetFilter) {
+    query = query.filter(preBudgetFilter);
   }
 
   return query;
@@ -122,8 +168,8 @@ export function transactionsSearch(
   });
 }
 
-export function uncategorizedTransactions() {
-  return q('transactions').filter({
+export function uncategorizedTransactions(budgetStartDate?: string | null) {
+  let query = q('transactions').filter({
     'account.offbudget': false,
     category: null,
     $or: [
@@ -133,4 +179,10 @@ export function uncategorizedTransactions() {
       },
     ],
   });
+
+  if (budgetStartDate) {
+    query = query.filter({ date: { $gte: budgetStartDate } });
+  }
+
+  return query;
 }

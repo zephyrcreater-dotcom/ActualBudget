@@ -135,17 +135,25 @@ export function categoryBalanceUncleared(
   } satisfies Binding<'category', 'balanceUncleared'>;
 }
 
-export function uncategorizedBalance<SheetName extends SheetNames>() {
+export function uncategorizedBalance<SheetName extends SheetNames>(
+  budgetStartDate?: string | null,
+) {
   return {
     name: 'uncategorized-balance',
-    query: uncategorizedTransactions().calculate({ $sum: '$amount' }),
+    query: uncategorizedTransactions(budgetStartDate).calculate({
+      $sum: '$amount',
+    }),
   } satisfies Binding<SheetName, 'uncategorized-balance'>;
 }
 
-export function uncategorizedCount<SheetName extends SheetNames>() {
+export function uncategorizedCount<SheetName extends SheetNames>(
+  budgetStartDate?: string | null,
+) {
   return {
     name: 'uncategorized-amount',
-    query: uncategorizedTransactions().calculate({ $count: '$id' }),
+    query: uncategorizedTransactions(budgetStartDate).calculate({
+      $count: '$id',
+    }),
   } satisfies Binding<SheetName, 'uncategorized-amount'>;
 }
 

@@ -243,6 +243,9 @@ type AccountInternalProps = {
   payees: PayeeEntity[];
   categoryGroups: CategoryGroupEntity[];
   hideFraction: boolean;
+  budgetStartDate?: string;
+  preBudgetMode: queries.PreBudgetTransactionFilterMode;
+  setPreBudgetMode: (mode: queries.PreBudgetTransactionFilterMode) => void;
   accountsSyncing: string[];
   dispatch: AppDispatch;
   onSetTransfer: ReturnType<typeof useTransactionBatchActions>['onSetTransfer'];
@@ -455,9 +458,10 @@ class AccountInternal extends PureComponent<
   };
 
   makeRootTransactionsQuery = () => {
-    const accountId = this.props.accountId;
-
-    return queries.transactions(accountId);
+    return queries.transactions(this.props.accountId, {
+      budgetStartDate: this.props.budgetStartDate,
+      preBudgetMode: this.props.preBudgetMode,
+    });
   };
 
   updateQuery(query: Query, isFiltered: boolean = false) {
@@ -528,7 +532,11 @@ class AccountInternal extends PureComponent<
 
   // oxlint-disable-next-line react/no-unsafe
   UNSAFE_componentWillReceiveProps(nextProps: AccountInternalProps) {
-    if (this.props.accountId !== nextProps.accountId) {
+    if (
+      this.props.accountId !== nextProps.accountId ||
+      this.props.budgetStartDate !== nextProps.budgetStartDate ||
+      this.props.preBudgetMode !== nextProps.preBudgetMode
+    ) {
       this.setState(
         {
           loading: true,
@@ -779,7 +787,8 @@ class AccountInternal extends PureComponent<
       | 'remove-sorting'
       | 'toggle-cleared'
       | 'toggle-reconciled'
-      | 'toggle-net-worth-chart',
+      | 'toggle-net-worth-chart'
+      | 'cycle-pre-budget-filter',
   ) => {
     const accountId = this.props.accountId!;
     const account = this.props.accounts.find(
@@ -888,6 +897,19 @@ class AccountInternal extends PureComponent<
           this.props.setShowNetWorthChart(true);
         }
         break;
+      case 'cycle-pre-budget-filter': {
+        const nextMode =
+          this.props.preBudgetMode === 'all'
+            ? 'hide'
+            : this.props.preBudgetMode === 'hide'
+              ? 'only'
+              : 'all';
+        this.props.setPreBudgetMode(nextMode);
+        this.setState({ loading: true }, () => {
+          this.fetchTransactions(this.state.filterConditions);
+        });
+        break;
+      }
       default:
     }
   };
@@ -1992,6 +2014,12 @@ export function Account() {
   const { data: payees = [] } = usePayees();
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
   const [hideFraction] = useSyncedPref('hideFraction');
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const [preBudgetModePref, setPreBudgetMode] = useSyncedPref(
+    'registerPreBudgetFilter',
+  );
+  const preBudgetMode =
+    queries.parsePreBudgetTransactionFilterMode(preBudgetModePref);
   const [expandSplits] = useLocalPref('expand-splits');
   const [showBalances, setShowBalances] = useSyncedPref(
     `show-balances-${params.id}`,
@@ -2049,6 +2077,9 @@ export function Account() {
             accounts={accounts}
             dateFormat={dateFormat}
             hideFraction={String(hideFraction) === 'true'}
+            budgetStartDate={budgetStartDate}
+            preBudgetMode={preBudgetMode}
+            setPreBudgetMode={mode => setPreBudgetMode(mode)}
             expandSplits={expandSplits}
             showBalances={String(showBalances) === 'true'}
             setShowBalances={showBalances =>

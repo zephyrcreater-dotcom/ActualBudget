@@ -59,17 +59,24 @@ function TransactionListWithPreviews({
 
   const [showRunningBalances] = useSyncedPref(`show-balances-${account.id}`);
   const [hideReconciled] = useSyncedPref(`hide-reconciled-${account.id}`);
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const [preBudgetModePref] = useSyncedPref('registerPreBudgetFilter');
+  const preBudgetMode =
+    queries.parsePreBudgetTransactionFilterMode(preBudgetModePref);
 
   const baseTransactionsQuery = useCallback(() => {
     let query = queries
-      .transactions(account.id)
+      .transactions(account.id, {
+        budgetStartDate,
+        preBudgetMode,
+      })
       .options({ splits: 'all' })
       .select('*');
     if (hideReconciled === 'true') {
       query = query.filter({ reconciled: { $eq: false } });
     }
     return query;
-  }, [account.id, hideReconciled]);
+  }, [account.id, budgetStartDate, hideReconciled, preBudgetMode]);
   const [transactionsQuery, setTransactionsQuery] = useState<Query>(
     baseTransactionsQuery(),
   );

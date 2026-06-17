@@ -29,6 +29,7 @@ import { useAccounts } from '#hooks/useAccounts';
 import { useNotes } from '#hooks/useNotes';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import type { Modal as ModalType } from '#modals/modalsSlice';
+import { parsePreBudgetTransactionFilterMode } from '#queries';
 
 type AccountMenuModalProps = Extract<
   ModalType,
@@ -225,6 +226,12 @@ function AdditionalAccountMenu({
   });
   const [showBalances] = useSyncedPref(`show-balances-${account.id}`);
   const [hideReconciled] = useSyncedPref(`hide-reconciled-${account.id}`);
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const [preBudgetModePref, setPreBudgetMode] = useSyncedPref(
+    'registerPreBudgetFilter',
+  );
+  const preBudgetMode =
+    parsePreBudgetTransactionFilterMode(preBudgetModePref);
 
   return (
     <View>
@@ -264,6 +271,19 @@ function AdditionalAccountMenu({
                     ? t('Hide reconciled transactions')
                     : t('Show reconciled transactions'),
               },
+              ...(budgetStartDate
+                ? [
+                    {
+                      name: 'cycle-pre-budget-filter',
+                      text:
+                        preBudgetMode === 'all'
+                          ? t('Hide pre-budget history')
+                          : preBudgetMode === 'hide'
+                            ? t('Show only pre-budget history')
+                            : t('Show all transactions'),
+                    } as const,
+                  ]
+                : []),
               account.closed
                 ? {
                     name: 'reopen',
@@ -292,6 +312,15 @@ function AdditionalAccountMenu({
                   break;
                 case 'toggle-reconciled':
                   onToggleReconciled?.();
+                  break;
+                case 'cycle-pre-budget-filter':
+                  setPreBudgetMode(
+                    preBudgetMode === 'all'
+                      ? 'hide'
+                      : preBudgetMode === 'hide'
+                        ? 'only'
+                        : 'all',
+                  );
                   break;
                 default:
                   throw new Error(`Unrecognized menu option: ${String(name)}`);

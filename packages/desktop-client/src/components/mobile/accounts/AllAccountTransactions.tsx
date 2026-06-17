@@ -12,6 +12,7 @@ import { useDateFormat } from '#hooks/useDateFormat';
 import { useNavigate } from '#hooks/useNavigate';
 import { usePreviewTransactions } from '#hooks/usePreviewTransactions';
 import { getSchedulesQuery } from '#hooks/useSchedules';
+import { useSyncedPref } from '#hooks/useSyncedPref';
 import { useTransactions } from '#hooks/useTransactions';
 import { useTransactionsSearch } from '#hooks/useTransactionsSearch';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
@@ -31,9 +32,20 @@ export function AllAccountTransactions() {
 
 function TransactionListWithPreviews() {
   const { t } = useTranslation();
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const [preBudgetModePref] = useSyncedPref('registerPreBudgetFilter');
+  const preBudgetMode =
+    queries.parsePreBudgetTransactionFilterMode(preBudgetModePref);
   const baseTransactionsQuery = useCallback(
-    () => queries.transactions().options({ splits: 'all' }).select('*'),
-    [],
+    () =>
+      queries
+        .transactions(undefined, {
+          budgetStartDate,
+          preBudgetMode,
+        })
+        .options({ splits: 'all' })
+        .select('*'),
+    [budgetStartDate, preBudgetMode],
   );
 
   const [transactionsQuery, setTransactionsQuery] = useState<Query>(

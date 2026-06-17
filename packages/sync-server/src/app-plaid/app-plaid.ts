@@ -341,6 +341,31 @@ app.post(
   }),
 );
 
+// Returns sign-corrected balances from Plaid accountsGet (reliable — does not
+// depend on the transactionsSync accounts array which can return null balances).
+// Used by the Plaid balance repair flow.
+app.post(
+  '/get-account-balances',
+  handleError(async (req, res) => {
+    const { itemId, plaidAccountId } = req.body || {};
+
+    if (!itemId) {
+      return res.status(400).send({
+        status: 'error',
+        reason: 'missing-item-id',
+        details: 'itemId is required',
+      });
+    }
+
+    const balances = await plaidService.getAccountBalancesForRepair(
+      itemId,
+      plaidAccountId,
+    );
+
+    res.send({ status: 'ok', data: { balances } });
+  }),
+);
+
 app.post(
   '/sync-plaid-transactions',
   handleError(async (req, res) => {

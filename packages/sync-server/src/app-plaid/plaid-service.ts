@@ -343,6 +343,67 @@ class PlaidServiceImpl {
   }
 
   /**
+   * Fetch current balances via accountsGet for one or all accounts on an item.
+   * Returns full metadata needed for balance repair logging + sign-corrected
+   * targetBalance in Actual cents (negative for credit/loan debt).
+   */
+  async getAccountBalancesForRepair(
+    itemId: string,
+    plaidAccountId?: string,
+  ): Promise<
+    Array<{
+      plaidAccountId: string;
+      name: string;
+      type: string;
+      subtype: string | null;
+      balanceCurrent: number | null;
+      balanceAvailable: number | null;
+      /** Sign-corrected balance in Actual cents. null when balanceCurrent is null. */
+      targetBalance: number | null;
+    }>
+  > {
+    const db = getAccountDb();
+    const item = db.first(
+      `SELECT item_id, access_token FROM plaid_items WHERE item_id = ?`,
+      [itemId],
+    ) as { item_id: string; access_token: string } | null;
+
+    if (!item) {
+      throw new Error(`Plaid item not found: ${itemId}`);
+    }
+
+    const client = this.initializeClient();
+    const response = await client.accountsGet({
+      access_token: item.access_token,
+      options: plaidAccountId ? { account_ids: [plaidAccountId] } : undefined,
+    });
+
+    const accounts = (response.data.accounts || []) as any[];
+
+    return accounts.map((a: any) => {
+      const rawCurrent: number | null =
+        a.balances?.current != null ? Number(a.balances.current) : null;
+      const rawAvailable: number | null =
+        a.balances?.available != null ? Number(a.balances.available) : null;
+      const isDebt = a.type === 'credit' || a.type === 'loan';
+      const targetBalance =
+        rawCurrent != null
+          ? Math.round(rawCurrent * 100) * (isDebt ? -1 : 1)
+          : null;
+
+      return {
+        plaidAccountId: a.account_id,
+        name: a.name,
+        type: a.type,
+        subtype: a.subtype ?? null,
+        balanceCurrent: rawCurrent,
+        balanceAvailable: rawAvailable,
+        targetBalance,
+      };
+    });
+  }
+
+  /**
    * Fetch and normalize transactions from Plaid
    * Returns transactions in Actual's expected format for import/matching
    */
@@ -358,7 +419,7 @@ class PlaidServiceImpl {
         currency: string;
       };
     }>;
-    startingBalance: number;
+    startingBalance: number | null;
   }> {
     debug(
       `Fetching Plaid transactions for item: ${itemId}, account: ${accountId}`,
@@ -452,17 +513,29 @@ class PlaidServiceImpl {
       // transactionsSync includes an `accounts` array with up-to-date balances.
       // Plaid convention: credit card `current` is positive = amount owed (debt).
       // Actual convention: debt is negative, so we negate credit/loan balances.
-      let startingBalance = 0;
+      // null means "Plaid returned no balance data" — distinct from a genuine $0
+      // balance. Callers must check for null before adjusting starting balances.
+      let startingBalance: number | null = null;
       const acctData = accountId
         ? lastAccounts.find((a: any) => a.account_id === accountId)
         : lastAccounts[0];
       if (acctData) {
-        const currentDollars: number = acctData.balances?.current ?? 0;
-        const isDebt = acctData.type === 'credit' || acctData.type === 'loan';
-        // Convert to cents (integer) and flip sign for debt accounts
-        startingBalance = Math.round(currentDollars * 100) * (isDebt ? -1 : 1);
+        const rawCurrent: number | null | undefined =
+          acctData.balances?.current;
+        if (rawCurrent != null) {
+          const isDebt = acctData.type === 'credit' || acctData.type === 'loan';
+          startingBalance = Math.round(rawCurrent * 100) * (isDebt ? -1 : 1);
+          console.log(
+            `[Plaid] getTransactions balance — account: ${accountId}, type: ${acctData.type}, current: ${rawCurrent}, startingBalance (cents): ${startingBalance}`,
+          );
+        } else {
+          console.log(
+            `[Plaid] getTransactions balance — account: ${accountId}, type: ${acctData.type}, balances.current is null/undefined — returning null to skip balance adjustment`,
+          );
+        }
+      } else {
         console.log(
-          `[Plaid] getTransactions balance — account: ${accountId}, type: ${acctData.type}, current: ${currentDollars}, startingBalance (cents): ${startingBalance}`,
+          `[Plaid] getTransactions balance — account: ${accountId} not found in transactionsSync accounts array — returning null`,
         );
       }
 

@@ -225,6 +225,33 @@ export function SelectLinkedAccountsModal({
   const [chosenAccounts, setChosenAccounts] = useState<Record<string, string>>(
     initiallyChosenAccounts,
   );
+
+  // Plaid-specific: checkbox-based account selection.
+  // All accounts start selected; user unchecks ones they don't want.
+  const [selectedPlaidAccountIds, setSelectedPlaidAccountIds] = useState<
+    Set<string>
+  >(() => {
+    if (syncSource !== 'plaid') return new Set();
+    return new Set(externalAccounts.map(a => a.account_id));
+  });
+  function togglePlaidAccount(accountId: string) {
+    const wasSelected = selectedPlaidAccountIds.has(accountId);
+    console.log(
+      `[Plaid] toggle account_id=${accountId} selected_before=${wasSelected}`,
+    );
+    setSelectedPlaidAccountIds(prev => {
+      const next = new Set(prev);
+      if (next.has(accountId)) {
+        next.delete(accountId);
+      } else {
+        next.add(accountId);
+      }
+      console.log(
+        `[Plaid] toggle account_id=${accountId} selected_after=${next.has(accountId)}`,
+      );
+      return next;
+    });
+  }
   const [customStartingDates, setCustomStartingDates] = useState<
     Record<string, StartingBalanceInfo>
   >(() => {
@@ -259,6 +286,50 @@ export function SelectLinkedAccountsModal({
   const linkAccountPlaid = useLinkAccountPlaidMutation();
 
   async function onNext() {
+    // Plaid: use checkbox-based selection — link only the checked accounts.
+    if (propsWithSortedExternalAccounts.syncSource === 'plaid') {
+      // Unlink accounts that were previously linked but the user unchecked.
+      propsWithSortedExternalAccounts.externalAccounts
+        .filter(acc => !selectedPlaidAccountIds.has(acc.account_id))
+        .forEach(acc => {
+          const existingLocalId = initiallyChosenAccounts[acc.account_id];
+          if (existingLocalId) {
+            console.log(
+              `[Plaid] unlinking account_id=${acc.account_id} local_id=${existingLocalId}`,
+            );
+            unlinkAccount.mutate({ id: existingLocalId });
+          }
+        });
+
+      // Link or re-link selected accounts. For accounts that are already
+      // linked (have a local account), pass their local ID as upgradingId so
+      // the existing account record is updated rather than duplicated.
+      propsWithSortedExternalAccounts.externalAccounts
+        .filter(acc => selectedPlaidAccountIds.has(acc.account_id))
+        .forEach(acc => {
+          const existingLocalId = initiallyChosenAccounts[acc.account_id];
+          const customSettings = customStartingDates[acc.account_id];
+          const startingDate =
+            customSettings?.date && customSettings.date.trim() !== ''
+              ? customSettings.date
+              : undefined;
+          const startingBalance =
+            customSettings?.amount != null ? customSettings.amount : undefined;
+          console.log(
+            `[Plaid] linking account_id=${acc.account_id} name="${acc.name}" upgradingId=${existingLocalId ?? '(new)'} startingBalance=${startingBalance}`,
+          );
+          linkAccountPlaid.mutate({
+            externalAccount: acc,
+            upgradingId: existingLocalId,
+            offBudget: false,
+            startingDate,
+            startingBalance,
+          });
+        });
+      dispatch(closeModal());
+      return;
+    }
+
     const chosenLocalAccountIds = Object.values(chosenAccounts);
 
     // Unlink accounts that were previously linked, but the user
@@ -341,21 +412,6 @@ export function SelectLinkedAccountsModal({
           propsWithSortedExternalAccounts.syncSource === 'enableBanking'
         ) {
           linkAccountEnableBanking.mutate({
-            externalAccount:
-              propsWithSortedExternalAccounts.externalAccounts[
-                externalAccountIndex
-              ],
-            upgradingId:
-              chosenLocalAccountId !== addOnBudgetAccountOption.id &&
-              chosenLocalAccountId !== addOffBudgetAccountOption.id
-                ? chosenLocalAccountId
-                : undefined,
-            offBudget,
-            startingDate,
-            startingBalance,
-          });
-        } else if (propsWithSortedExternalAccounts.syncSource === 'plaid') {
-          linkAccountPlaid.mutate({
             externalAccount:
               propsWithSortedExternalAccounts.externalAccounts[
                 externalAccountIndex
@@ -467,6 +523,12 @@ export function SelectLinkedAccountsModal({
   };
 
   const label = useMemo(() => {
+    if (syncSource === 'plaid') {
+      const count = selectedPlaidAccountIds.size;
+      return count === 1
+        ? t('Link 1 account')
+        : t('Link {{count}} accounts', { count });
+    }
     const s = new Set(draftLinkAccounts.values());
     if (s.has('linking') && s.has('unlinking')) {
       return t('Link and unlink accounts');
@@ -477,7 +539,7 @@ export function SelectLinkedAccountsModal({
     }
 
     return t('Link or unlink accounts');
-  }, [draftLinkAccounts, t]);
+  }, [draftLinkAccounts, selectedPlaidAccountIds, syncSource, t]);
 
   return (
     <Modal
@@ -518,7 +580,15 @@ export function SelectLinkedAccountsModal({
             </Text>
           </View>
 
-          {isNarrowWidth ? (
+          {propsWithSortedExternalAccounts.syncSource === 'plaid' ? (
+            <PlaidAccountCheckboxList
+              accounts={propsWithSortedExternalAccounts.externalAccounts}
+              selectedIds={selectedPlaidAccountIds}
+              onToggle={togglePlaidAccount}
+              customStartingDates={customStartingDates}
+              onSetCustomStartingDate={setCustomStartingDate}
+            />
+          ) : isNarrowWidth ? (
             <View
               style={{
                 flex: 1,
@@ -604,7 +674,11 @@ export function SelectLinkedAccountsModal({
             <Button
               variant="primary"
               onPress={onNext}
-              isDisabled={draftLinkAccounts.size === 0}
+              isDisabled={
+                syncSource === 'plaid'
+                  ? selectedPlaidAccountIds.size === 0
+                  : draftLinkAccounts.size === 0
+              }
               style={
                 isNarrowWidth
                   ? {
@@ -860,6 +934,212 @@ function TableRow({
         )}
       </Field>
     </Row>
+  );
+}
+
+type PlaidAccountCheckboxListProps = {
+  accounts: SyncServerPlaidAccount[];
+  selectedIds: Set<string>;
+  onToggle: (accountId: string) => void;
+  customStartingDates: Record<string, StartingBalanceInfo>;
+  onSetCustomStartingDate: (
+    accountId: string,
+    settings: StartingBalanceInfo,
+  ) => void;
+};
+
+function PlaidAccountCheckboxList({
+  accounts,
+  selectedIds,
+  onToggle,
+  customStartingDates,
+  onSetCustomStartingDate,
+}: PlaidAccountCheckboxListProps) {
+  const format = useFormat();
+  const { t } = useTranslation();
+
+  return (
+    <View
+      style={{
+        overflowY: 'auto',
+        maxHeight: 400,
+        padding: '0 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      {accounts.map(account => {
+        const isSelected = selectedIds.has(account.account_id);
+        const customSettings = customStartingDates[account.account_id];
+        const zeroSign =
+          account.balance != null && account.balance < 0 ? '-' : '+';
+
+        return (
+          <View
+            key={account.account_id}
+            style={{
+              backgroundColor: theme.tableBackground,
+              borderRadius: 6,
+              border: `1px solid ${isSelected ? theme.buttonPrimaryBackground : theme.tableBorder}`,
+              padding: '12px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              cursor: 'pointer',
+              opacity: isSelected ? 1 : 0.55,
+            }}
+            onClick={() => onToggle(account.account_id)}
+          >
+            <View
+              style={{
+                display: 'flex',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              {/* Checkbox indicator */}
+              <View
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 3,
+                  border: `2px solid ${isSelected ? theme.buttonPrimaryBackground : theme.tableTextLight}`,
+                  backgroundColor: isSelected
+                    ? theme.buttonPrimaryBackground
+                    : 'transparent',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {isSelected && (
+                  <View
+                    style={{
+                      width: 10,
+                      height: 6,
+                      borderLeft: `2px solid ${theme.buttonPrimaryText}`,
+                      borderBottom: `2px solid ${theme.buttonPrimaryText}`,
+                      transform: 'rotate(-45deg) translateY(-1px)',
+                    }}
+                  />
+                )}
+              </View>
+
+              {/* Account name + type */}
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontWeight: 600,
+                    color: theme.pageText,
+                    fontSize: 14,
+                  }}
+                >
+                  {account.name}
+                </Text>
+                {account.subtype && (
+                  <Text style={{ fontSize: 12, color: theme.pageTextSubdued }}>
+                    {account.subtype}
+                    {account.mask ? ` ••••${account.mask}` : ''}
+                  </Text>
+                )}
+              </View>
+
+              {/* Balance */}
+              <PrivacyFilter>
+                {account.balance != null ? (
+                  <FinancialText
+                    style={{ fontWeight: 500, color: theme.pageText }}
+                  >
+                    {format(account.balance.toString(), 'financial')}
+                  </FinancialText>
+                ) : (
+                  <Text style={{ color: theme.pageTextSubdued }}>
+                    <Trans>Unknown</Trans>
+                  </Text>
+                )}
+              </PrivacyFilter>
+            </View>
+
+            {/* Starting date/balance (only shown when selected) */}
+            {isSelected && (
+              <View
+                onClick={e => e.stopPropagation()}
+                style={{
+                  paddingTop: 8,
+                  borderTop: `1px solid ${theme.tableBorder}`,
+                  display: 'flex',
+                  flexDirection: 'row',
+                  gap: 16,
+                  alignItems: 'center',
+                }}
+              >
+                <View
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    gap: 8,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: theme.pageTextSubdued,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <Trans>Starting date:</Trans>
+                  </Text>
+                  <Input
+                    type="date"
+                    value={customSettings?.date ?? ''}
+                    onChange={e =>
+                      onSetCustomStartingDate(account.account_id, {
+                        ...customSettings,
+                        date: e.target.value,
+                      })
+                    }
+                    style={{ fontSize: 12 }}
+                  />
+                </View>
+                <View
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    gap: 8,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: theme.pageTextSubdued,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <Trans>Starting balance:</Trans>
+                  </Text>
+                  <AmountInput
+                    value={customSettings?.amount ?? 0}
+                    zeroSign={zeroSign}
+                    onUpdate={amount =>
+                      onSetCustomStartingDate(account.account_id, {
+                        ...customSettings,
+                        amount,
+                      })
+                    }
+                    style={{ fontSize: 12, width: 120 }}
+                  />
+                </View>
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
   );
 }
 

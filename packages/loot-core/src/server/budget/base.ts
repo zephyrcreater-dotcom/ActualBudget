@@ -9,6 +9,10 @@ import { getChangedValues } from '#shared/util';
 import type { CategoryGroupEntity } from '#types/models';
 
 import * as budgetActions from './actions';
+import {
+  getBudgetStartDateRepr,
+  getBudgetStartMonth,
+} from './budget-start';
 import * as envelopeBudget from './envelope';
 import * as trackingBudget from './tracking';
 
@@ -49,6 +53,7 @@ function getSumAmountsByMonth(
   rangeStart: number,
   rangeEnd: number,
 ): Map<string, number> {
+  const budgetStartDateRepr = getBudgetStartDateRepr();
   const rows = db.runQuery<{ month: number; category: string; amount: number }>(
     `SELECT t.category AS category,
             t.date / 100 AS month,
@@ -56,6 +61,7 @@ function getSumAmountsByMonth(
        FROM v_transactions_internal_alive t
        LEFT JOIN accounts a ON a.id = t.account
       WHERE t.date >= ${rangeStart} AND t.date <= ${rangeEnd}
+        ${budgetStartDateRepr != null ? `AND t.date >= ${budgetStartDateRepr}` : ''}
         AND t.category IS NOT NULL
         AND a.offbudget = 0
       GROUP BY t.category, t.date / 100`,
@@ -75,10 +81,12 @@ export function createCategory(cat, sheetName, prevSheetName, start, end) {
     initialValue: 0,
     run: () => {
       // Making this sync is faster!
+      const budgetStartDateRepr = getBudgetStartDateRepr();
       const rows = db.runQuery<{ amount: number }>(
         `SELECT SUM(amount) as amount FROM v_transactions_internal_alive t
            LEFT JOIN accounts a ON a.id = t.account
          WHERE t.date >= ${start} AND t.date <= ${end}
+           ${budgetStartDateRepr != null ? `AND t.date >= ${budgetStartDateRepr}` : ''}
            AND category = '${cat.id}' AND a.offbudget = 0`,
         [],
         true,
@@ -94,6 +102,22 @@ export function createCategory(cat, sheetName, prevSheetName, start, end) {
   } else {
     void trackingBudget.createCategory(cat, sheetName, prevSheetName);
   }
+}
+
+function recomputeBudgetStartCarryover() {
+  const budgetStartMonth = getBudgetStartMonth();
+  if (!budgetStartMonth) {
+    return;
+  }
+
+  sheet
+    .get()
+    .recompute(
+      resolveName(
+        monthUtils.sheetForMonth(budgetStartMonth),
+        'budget-start-carryover',
+      ),
+    );
 }
 
 function handleAccountChange(months, oldValue, newValue) {
@@ -116,6 +140,8 @@ function handleAccountChange(months, oldValue, newValue) {
           .recompute(resolveName(sheetName, 'sum-amount-' + row.category));
       });
     });
+
+    recomputeBudgetStartCarryover();
   }
 }
 
@@ -136,6 +162,16 @@ function handleTransactionChange(transaction, changedFields) {
     sheet
       .get()
       .recompute(resolveName(sheetName, 'sum-amount-' + transaction.category));
+  }
+
+  if (
+    changedFields.has('date') ||
+    changedFields.has('acct') ||
+    changedFields.has('amount') ||
+    changedFields.has('tombstone') ||
+    changedFields.has('isParent')
+  ) {
+    recomputeBudgetStartCarryover();
   }
 }
 

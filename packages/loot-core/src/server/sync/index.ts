@@ -15,6 +15,7 @@ import {
   setType as setBudgetType,
   triggerBudgetChanges,
 } from '#server/budget/base';
+import { refreshBudgetStart } from '#server/budget/budget-start';
 import * as db from '#server/db';
 import { PostError, SyncError } from '#server/errors';
 import { app } from '#server/main-app';
@@ -367,6 +368,8 @@ export const applyMessages = sequential(async (messages: Message[]) => {
       // Special treatment for some synced prefs
       if (dataset === 'preferences' && row === 'budgetType') {
         void setBudgetType(value);
+      } else if (dataset === 'preferences' && row === 'budgetStartDate') {
+        void refreshBudgetStart();
       }
     }
 

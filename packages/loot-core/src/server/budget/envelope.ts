@@ -5,6 +5,10 @@ import { resolveName } from '#server/spreadsheet/util';
 import * as monthUtils from '#shared/months';
 import { safeNumber } from '#shared/util';
 
+import {
+  calculateBudgetStartCarryforward,
+  getBudgetStartMonth,
+} from './budget-start';
 import { createCategory as createCategoryFromBase } from './base';
 import { flatten2, number, sumAmounts, unflatten2 } from './util';
 
@@ -26,6 +30,7 @@ function createBlankMonth(categories, sheetName, months) {
   sheet.get().createStatic(sheetName, 'is-blank', true);
   sheet.get().createStatic(sheetName, 'to-budget', 0);
   sheet.get().createStatic(sheetName, 'buffered', 0);
+  sheet.get().createStatic(sheetName, 'budget-start-carryover', 0);
 
   categories.forEach(cat => createBlankCategory(cat, months));
 }
@@ -99,8 +104,18 @@ export function createSummary(groups, categories, prevSheetName, sheetName) {
   const incomeGroup = groups.filter(group => group.is_income)[0];
   const expenseCategories = categories.filter(cat => !cat.is_income);
   const incomeCategories = categories.filter(cat => cat.is_income);
+  const budgetStartMonth = getBudgetStartMonth();
+  const isBudgetStartMonth =
+    budgetStartMonth != null &&
+    sheetName === monthUtils.sheetForMonth(budgetStartMonth);
 
   sheet.get().createStatic(sheetName, 'buffered', 0);
+  sheet.get().createDynamic(sheetName, 'budget-start-carryover', {
+    initialValue: 0,
+    run: () => {
+      return isBudgetStartMonth ? calculateBudgetStartCarryforward() : 0;
+    },
+  });
 
   sheet.get().createDynamic(sheetName, 'from-last-month', {
     initialValue: 0,
@@ -108,8 +123,11 @@ export function createSummary(groups, categories, prevSheetName, sheetName) {
       `${prevSheetName}!to-budget`,
       `${prevSheetName}!buffered-selected`,
     ],
-    run: (toBudget, buffered) =>
-      safeNumber(number(toBudget) + number(buffered)),
+    run: (toBudget, buffered) => {
+      return isBudgetStartMonth
+        ? 0
+        : safeNumber(number(toBudget) + number(buffered));
+    },
   });
 
   // Alias the group income total to `total-income`
@@ -121,9 +139,11 @@ export function createSummary(groups, categories, prevSheetName, sheetName) {
 
   sheet.get().createDynamic(sheetName, 'available-funds', {
     initialValue: 0,
-    dependencies: ['total-income', 'from-last-month'],
-    run: (income, fromLastMonth) =>
-      safeNumber(number(income) + number(fromLastMonth)),
+    dependencies: ['total-income', 'from-last-month', 'budget-start-carryover'],
+    run: (income, fromLastMonth, budgetStartCarryover) =>
+      safeNumber(
+        number(income) + number(fromLastMonth) + number(budgetStartCarryover),
+      ),
   });
 
   sheet.get().createDynamic(sheetName, 'last-month-overspent', {
@@ -135,6 +155,10 @@ export function createSummary(groups, categories, prevSheetName, sheetName) {
       ]),
     ),
     run: (...data) => {
+      if (isBudgetStartMonth) {
+        return 0;
+      }
+
       data = unflatten2(data);
       return safeNumber(
         data.reduce((total, [leftover, carryover]) => {

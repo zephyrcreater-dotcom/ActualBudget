@@ -87,6 +87,7 @@ export type AccountHandlers = {
   'gocardless-create-web-token': typeof createGoCardlessWebToken;
   'accounts-bank-sync': typeof accountsBankSync;
   'simplefin-batch-sync': typeof simpleFinBatchSync;
+  'plaid-repair-balances': typeof plaidRepairBalances;
   'transactions-import': typeof importTransactions;
   'account-unlink': typeof unlinkAccount;
 };
@@ -581,6 +582,9 @@ async function linkPlaidAccount({
     }
 
     id = accRow.id;
+    logger.log(
+      `[Plaid] linkPlaidAccount — UPGRADING existing account: local_id=${id}, plaid_account_id=${externalAccount.account_id}, bank_id=${bank.bank_id}`,
+    );
     await db.update('accounts', {
       id,
       account_id: externalAccount.account_id,
@@ -589,6 +593,9 @@ async function linkPlaidAccount({
     });
   } else {
     id = uuidv4();
+    logger.log(
+      `[Plaid] linkPlaidAccount — CREATING new account: new_local_id=${id}, plaid_account_id=${externalAccount.account_id}, bank_id=${bank.bank_id}, startingBalance=${startingBalance}`,
+    );
     await db.insertWithUUID('accounts', {
       id,
       account_id: externalAccount.account_id,
@@ -608,6 +615,9 @@ async function linkPlaidAccount({
     throw new Error('id was not assigned in linkPlaidAccount');
   }
 
+  logger.log(
+    `[Plaid] linkPlaidAccount — syncing account: local_id=${id}, plaid_account_id=${externalAccount.account_id}, startingDate=${startingDate}, startingBalance=${startingBalance}`,
+  );
   const syncRes = await bankSync.syncAccount(
     undefined,
     undefined,
@@ -1540,7 +1550,25 @@ async function accountsBankSync({
     }
   }
 
-  if (updatedAccounts.length > 0) {
+  // For Plaid accounts, also repair balances via accountsGet after all syncs
+  // finish. transactionsSync can return null for balances.current on some
+  // account types; accountsGet is always reliable.
+  const hasSyncedPlaidAccount = accounts.some(
+    a =>
+      (a.account_sync_source as string) === 'plaid' && a.bankId && a.account_id,
+  );
+  if (hasSyncedPlaidAccount) {
+    try {
+      await bankSync.repairPlaidBalances();
+    } catch (err) {
+      logger.log(
+        '[Plaid] accountsBankSync: repairPlaidBalances failed (non-fatal):',
+        (err as Error).message,
+      );
+    }
+  }
+
+  if (updatedAccounts.length > 0 || hasSyncedPlaidAccount) {
     connection.send('sync-event', {
       type: 'success',
       tables: ['transactions', 'accounts'],
@@ -1668,6 +1696,25 @@ async function simpleFinBatchSync({
   logger.groupEnd();
 
   return retVal;
+}
+
+async function plaidRepairBalances(): Promise<
+  Awaited<ReturnType<typeof bankSync.repairPlaidBalances>>
+> {
+  logger.log('[Plaid] plaid-repair-balances: starting balance repair');
+  const results = await bankSync.repairPlaidBalances();
+  logger.log(
+    '[Plaid] plaid-repair-balances: done,',
+    results.length,
+    'accounts processed',
+  );
+
+  connection.send('sync-event', {
+    type: 'success',
+    tables: ['transactions', 'accounts'],
+  });
+
+  return results;
 }
 
 export type ImportTransactionsResult = bankSync.ReconcileTransactionsResult & {
@@ -1840,5 +1887,6 @@ app.method('gocardless-get-banks', getGoCardlessBanks);
 app.method('gocardless-create-web-token', createGoCardlessWebToken);
 app.method('accounts-bank-sync', accountsBankSync);
 app.method('simplefin-batch-sync', simpleFinBatchSync);
+app.method('plaid-repair-balances', plaidRepairBalances);
 app.method('transactions-import', mutator(undoable(importTransactions)));
 app.method('account-unlink', mutator(unlinkAccount));

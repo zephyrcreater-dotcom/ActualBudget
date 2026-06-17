@@ -16,6 +16,7 @@ import { useNavigate } from '#hooks/useNavigate';
 import { useOnBudgetAccounts } from '#hooks/useOnBudgetAccounts';
 import { usePreviewTransactions } from '#hooks/usePreviewTransactions';
 import { getSchedulesQuery } from '#hooks/useSchedules';
+import { useSyncedPref } from '#hooks/useSyncedPref';
 import { useTransactions } from '#hooks/useTransactions';
 import { useTransactionsSearch } from '#hooks/useTransactionsSearch';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
@@ -35,10 +36,20 @@ export function OnBudgetAccountTransactions() {
 
 function TransactionListWithPreviews() {
   const { t } = useTranslation();
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const [preBudgetModePref] = useSyncedPref('registerPreBudgetFilter');
+  const preBudgetMode =
+    queries.parsePreBudgetTransactionFilterMode(preBudgetModePref);
   const baseTransactionsQuery = useCallback(
     () =>
-      queries.transactions('onbudget').options({ splits: 'all' }).select('*'),
-    [],
+      queries
+        .transactions('onbudget', {
+          budgetStartDate,
+          preBudgetMode,
+        })
+        .options({ splits: 'all' })
+        .select('*'),
+    [budgetStartDate, preBudgetMode],
   );
 
   const [transactionsQuery, setTransactionsQuery] = useState<Query>(

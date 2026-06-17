@@ -689,10 +689,11 @@ function Banner({ type = 'info', children }) {
 function UncategorizedTransactionsBanner(props) {
   const navigate = useNavigate();
   const format = useFormat();
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
 
   const transactionsQuery = useMemo(
-    () => uncategorizedTransactions().select('*'),
-    [],
+    () => uncategorizedTransactions(budgetStartDate).select('*'),
+    [budgetStartDate],
   );
 
   const { transactions, isPending: isTransactionsLoading } = useTransactions({

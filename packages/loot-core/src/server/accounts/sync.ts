@@ -81,11 +81,22 @@ async function updateAccountBalance(id: AccountEntity['id'], balance: number) {
  * touched; user-edited payees, categories, and reconciled transactions are
  * never modified.
  */
+/**
+ * Set the starting-balance transaction so that sum(all transactions) == targetBalance.
+ * Only skips when the starting-balance tx is reconciled (user-locked).
+ * Callers are responsible for passing null when Plaid returned no balance data —
+ * this function never skips solely because targetBalance === 0.
+ */
 async function adjustPlaidStartingBalance(
   accountId: string,
   targetBalance: number,
-) {
-  // Find the starting-balance transaction (there should be exactly one).
+  accountName?: string,
+): Promise<{
+  oldStarting: number;
+  newStarting: number;
+  otherSum: number;
+  finalBalance: number;
+} | null> {
   const startingTx = await db.first<{
     id: string;
     amount: number;
@@ -99,41 +110,40 @@ async function adjustPlaidStartingBalance(
 
   if (!startingTx) {
     logger.log(
-      '[Plaid] adjustPlaidStartingBalance: no starting-balance transaction found for account',
-      accountId,
+      `[Plaid] adjustPlaidStartingBalance — account: ${accountName ?? accountId} — no starting-balance transaction found, skipping`,
     );
-    return;
+    return null;
   }
 
-  // Don't touch a transaction the user has already reconciled.
   if (startingTx.reconciled) {
     logger.log(
-      '[Plaid] adjustPlaidStartingBalance: starting-balance tx is reconciled — skipping',
+      `[Plaid] adjustPlaidStartingBalance — account: ${accountName ?? accountId} — starting-balance tx is reconciled, skipping`,
     );
-    return;
+    return null;
   }
 
-  // Sum of every OTHER transaction (all except the starting-balance tx).
   const otherSumRow = await db.first<{ s: number }>(
     `SELECT sum(amount) as s FROM transactions
      WHERE acct = ? AND starting_balance_flag = 0 AND isParent = 0 AND tombstone = 0`,
     [accountId],
   );
   const otherSum = otherSumRow?.s ?? 0;
-
-  // The starting balance we need so that: startingBalance + otherSum == targetBalance.
-  const newStartingAmount = targetBalance - otherSum;
+  const newStarting = targetBalance - otherSum;
 
   logger.log(
-    `[Plaid] adjustPlaidStartingBalance — account: ${accountId}, targetBalance: ${targetBalance}, otherSum: ${otherSum}, oldStarting: ${startingTx.amount}, newStarting: ${newStartingAmount}`,
+    `[Plaid] adjustPlaidStartingBalance — account: "${accountName ?? accountId}" (${accountId}), targetBalance: ${targetBalance}, otherSum: ${otherSum}, oldStarting: ${startingTx.amount}, newStarting: ${newStarting}, finalBalance: ${newStarting + otherSum}`,
   );
 
-  if (newStartingAmount === startingTx.amount) return; // already correct
+  if (newStarting !== startingTx.amount) {
+    await db.update('transactions', { id: startingTx.id, amount: newStarting });
+  }
 
-  await db.update('transactions', {
-    id: startingTx.id,
-    amount: newStartingAmount,
-  });
+  return {
+    oldStarting: startingTx.amount,
+    newStarting,
+    otherSum,
+    finalBalance: newStarting + otherSum,
+  };
 }
 
 async function getAccountOldestTransaction(id): Promise<TransactionEntity> {
@@ -1263,13 +1273,16 @@ async function processBankSyncDownload(
     if (currentBalance != null) {
       await updateAccountBalance(id, currentBalance);
 
-      // For Plaid accounts, also adjust the starting-balance transaction so
-      // the displayed account balance matches the Plaid current balance.
-      // This is necessary when there are no new transactions to import —
-      // otherwise the sum-of-transactions balance would stay stale.
       if (acctRow.account_sync_source === 'plaid') {
-        await adjustPlaidStartingBalance(id, currentBalance);
+        logger.log(
+          `[Plaid] processBankSyncDownload — account: "${acctRow.name}" (${id}), plaid_account_id: ${acctRow.account_id}, currentBalance (cents): ${currentBalance}, transactions: ${transactions.length}`,
+        );
+        await adjustPlaidStartingBalance(id, currentBalance, acctRow.name);
       }
+    } else if (acctRow.account_sync_source === 'plaid') {
+      logger.log(
+        `[Plaid] processBankSyncDownload — account: "${acctRow.name}" (${id}), plaid_account_id: ${acctRow.account_id}, currentBalance is null — Plaid returned no balance data, skipping adjustment`,
+      );
     }
 
     return result;
@@ -1326,6 +1339,197 @@ export async function syncAccount(
     customStartingBalance,
     customStartingDate,
   );
+}
+
+type PlaidRepairResult = {
+  accountId: string;
+  accountName: string;
+  plaidAccountId: string;
+  plaidType: string;
+  plaidSubtype: string | null;
+  balanceCurrent: number | null;
+  balanceAvailable: number | null;
+  targetBalance: number | null;
+  otherSum: number | null;
+  oldStarting: number | null;
+  newStarting: number | null;
+  finalBalance: number | null;
+  status: 'repaired' | 'skipped' | 'no_balance' | 'error';
+  reason?: string;
+};
+
+/**
+ * For every Plaid-linked account, fetch the current balance via accountsGet
+ * (more reliable than transactionsSync accounts array), then adjust the
+ * starting-balance transaction so the displayed balance equals the Plaid balance.
+ *
+ * Sign convention: depository positive, credit/loan negative (Actual convention).
+ * Only skips when Plaid returns null for balances.current.
+ */
+export async function repairPlaidBalances(): Promise<PlaidRepairResult[]> {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  // Fetch all open, non-tombstoned Plaid accounts with their bank (item) IDs.
+  const plaidAccounts = db.runQuery<{
+    id: string;
+    name: string;
+    account_id: string;
+    bank_id: string;
+  }>(
+    `SELECT a.id, a.name, a.account_id, b.bank_id
+     FROM accounts a
+     JOIN banks b ON a.bank = b.id
+     WHERE a.account_sync_source = 'plaid'
+       AND a.tombstone = 0
+       AND a.closed = 0`,
+    [],
+    true,
+  );
+
+  if (!plaidAccounts.length) {
+    logger.log('[Plaid] repairPlaidBalances: no Plaid-linked accounts found');
+    return [];
+  }
+
+  // Group by item (bank_id) to minimize API calls.
+  const byItem = new Map<string, typeof plaidAccounts>();
+  for (const acct of plaidAccounts) {
+    const list = byItem.get(acct.bank_id) ?? [];
+    list.push(acct);
+    byItem.set(acct.bank_id, list);
+  }
+
+  const results: PlaidRepairResult[] = [];
+
+  for (const [itemId, accounts] of byItem) {
+    let plaidBalances: Array<{
+      plaidAccountId: string;
+      name: string;
+      type: string;
+      subtype: string | null;
+      balanceCurrent: number | null;
+      balanceAvailable: number | null;
+      targetBalance: number | null;
+    }>;
+
+    try {
+      const res = await post(
+        getServer().PLAID_SERVER + '/get-account-balances',
+        { itemId },
+        { 'X-ACTUAL-TOKEN': userToken },
+        30000,
+      );
+      plaidBalances = (res.data?.balances ??
+        res.balances ??
+        []) as typeof plaidBalances;
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      logger.log(
+        `[Plaid] repairPlaidBalances: accountsGet failed for item ${itemId}: ${msg}`,
+      );
+      for (const acct of accounts) {
+        results.push({
+          accountId: acct.id,
+          accountName: acct.name,
+          plaidAccountId: acct.account_id,
+          plaidType: '',
+          plaidSubtype: null,
+          balanceCurrent: null,
+          balanceAvailable: null,
+          targetBalance: null,
+          otherSum: null,
+          oldStarting: null,
+          newStarting: null,
+          finalBalance: null,
+          status: 'error',
+          reason: msg,
+        });
+      }
+      continue;
+    }
+
+    const balanceByPlaidId = new Map(
+      plaidBalances.map(b => [b.plaidAccountId, b]),
+    );
+
+    for (const acct of accounts) {
+      const plaidData = balanceByPlaidId.get(acct.account_id);
+
+      if (!plaidData) {
+        logger.log(
+          `[Plaid] repairPlaidBalances — account: "${acct.name}" (${acct.id}), plaid_account_id: ${acct.account_id} not found in accountsGet response — skipping`,
+        );
+        results.push({
+          accountId: acct.id,
+          accountName: acct.name,
+          plaidAccountId: acct.account_id,
+          plaidType: '',
+          plaidSubtype: null,
+          balanceCurrent: null,
+          balanceAvailable: null,
+          targetBalance: null,
+          otherSum: null,
+          oldStarting: null,
+          newStarting: null,
+          finalBalance: null,
+          status: 'skipped',
+          reason: 'not found in accountsGet response',
+        });
+        continue;
+      }
+
+      logger.log(
+        `[Plaid] repairPlaidBalances — account: "${acct.name}" (${acct.id}), plaid_account_id: ${acct.account_id}, plaid_type: ${plaidData.type}/${plaidData.subtype ?? '-'}, balances.current: ${plaidData.balanceCurrent}, balances.available: ${plaidData.balanceAvailable}, targetBalance (cents): ${plaidData.targetBalance}`,
+      );
+
+      if (plaidData.targetBalance === null) {
+        results.push({
+          accountId: acct.id,
+          accountName: acct.name,
+          plaidAccountId: acct.account_id,
+          plaidType: plaidData.type,
+          plaidSubtype: plaidData.subtype,
+          balanceCurrent: plaidData.balanceCurrent,
+          balanceAvailable: plaidData.balanceAvailable,
+          targetBalance: null,
+          otherSum: null,
+          oldStarting: null,
+          newStarting: null,
+          finalBalance: null,
+          status: 'no_balance',
+          reason: 'Plaid returned null for balances.current',
+        });
+        continue;
+      }
+
+      const adjusted = await adjustPlaidStartingBalance(
+        acct.id,
+        plaidData.targetBalance,
+        acct.name,
+      );
+
+      results.push({
+        accountId: acct.id,
+        accountName: acct.name,
+        plaidAccountId: acct.account_id,
+        plaidType: plaidData.type,
+        plaidSubtype: plaidData.subtype,
+        balanceCurrent: plaidData.balanceCurrent,
+        balanceAvailable: plaidData.balanceAvailable,
+        targetBalance: plaidData.targetBalance,
+        otherSum: adjusted?.otherSum ?? null,
+        oldStarting: adjusted?.oldStarting ?? null,
+        newStarting: adjusted?.newStarting ?? null,
+        finalBalance: adjusted?.finalBalance ?? null,
+        status: adjusted ? 'repaired' : 'skipped',
+        reason: adjusted
+          ? undefined
+          : 'starting balance tx reconciled or missing',
+      });
+    }
+  }
+
+  return results;
 }
 
 export async function simpleFinBatchSync(

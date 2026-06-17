@@ -10,6 +10,76 @@ beforeEach(() => {
 });
 
 describe('Base budget', () => {
+  it('starts envelope budgeting from the configured budget start date', async () => {
+    await sheet.loadSpreadsheet(db);
+
+    await db.update('preferences', {
+      id: 'budgetStartDate',
+      value: '2016-06-01',
+    });
+
+    await db.insertCategoryGroup({ id: 'expenses', name: 'Expenses' });
+    await db.insertCategoryGroup({
+      id: 'income',
+      name: 'Income',
+      is_income: 1,
+    });
+
+    const expenseCategoryId = await db.insertCategory({
+      id: 'groceries',
+      name: 'Groceries',
+      cat_group: 'expenses',
+    });
+    const incomeCategoryId = await db.insertCategory({
+      id: 'starting-balances',
+      name: 'Starting Balances',
+      cat_group: 'income',
+      is_income: 1,
+    });
+
+    await db.insertAccount({ id: 'checking', name: 'Checking' });
+    await db.insertTransaction({
+      id: 'starting-balance',
+      date: '2016-05-01',
+      amount: 500000,
+      account: 'checking',
+      category: incomeCategoryId,
+    });
+    await db.insertTransaction({
+      id: 'old-spending',
+      date: '2016-05-20',
+      amount: -100000,
+      account: 'checking',
+      category: expenseCategoryId,
+    });
+    await db.insertTransaction({
+      id: 'current-spending',
+      date: '2016-06-10',
+      amount: -25000,
+      account: 'checking',
+      category: expenseCategoryId,
+    });
+
+    await createAllBudgets();
+    await sheet.waitOnSpreadsheet();
+
+    expect(
+      sheet.getCellValue(
+        monthUtils.sheetForMonth('2016-06'),
+        'budget-start-carryover',
+      ),
+    ).toBe(400000);
+    expect(
+      sheet.getCellValue(monthUtils.sheetForMonth('2016-06'), 'available-funds'),
+    ).toBe(400000);
+    expect(
+      sheet.getCellValue(
+        monthUtils.sheetForMonth('2016-06'),
+        `sum-amount-${expenseCategoryId}`,
+      ),
+    ).toBe(-25000);
+  });
+
   it('Recomputes budget cells when account fields change', async () => {
     await sheet.loadSpreadsheet(db);
 

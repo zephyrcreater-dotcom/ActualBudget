@@ -29,6 +29,7 @@ import { useDispatch, useSelector } from '#redux';
 
 import { AuthSettings } from './AuthSettings';
 import { Backups } from './Backups';
+import { BudgetStartSettings } from './BudgetStartSettings';
 import { BudgetTypeSettings } from './BudgetTypeSettings';
 import { CurrencySettings } from './Currency';
 import { EncryptionSettings } from './Encryption';
@@ -36,6 +37,7 @@ import { ExperimentalFeatures } from './Experimental';
 import { ExportBudget } from './Export';
 import { FormatSettings } from './Format';
 import { LanguageSettings } from './LanguageSettings';
+import { RepairPlaidBalances } from './RepairPlaidBalances';
 import { RepairTransactions } from './RepairTransactions';
 import { ResetCache, ResetSync } from './Reset';
 import { ThemeSettings } from './Themes';
@@ -244,6 +246,7 @@ export function Settings() {
         <AuthSettings />
         <EncryptionSettings />
         <BudgetTypeSettings />
+        <BudgetStartSettings />
         {isElectron() && <Backups />}
         <ExportBudget />
         <AdvancedToggle>
@@ -251,6 +254,7 @@ export function Settings() {
           <ResetCache />
           <ResetSync />
           <RepairTransactions />
+          <RepairPlaidBalances />
           <ExperimentalFeatures />
         </AdvancedToggle>
       </View>

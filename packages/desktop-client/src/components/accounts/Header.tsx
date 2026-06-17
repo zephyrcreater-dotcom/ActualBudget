@@ -49,6 +49,7 @@ import { useLocalPref } from '#hooks/useLocalPref';
 import { useSplitsExpanded } from '#hooks/useSplitsExpanded';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { useSyncServerStatus } from '#hooks/useSyncServerStatus';
+import { parsePreBudgetTransactionFilterMode } from '#queries';
 
 import type { TableRef } from './Account';
 import { Balances } from './Balance';
@@ -201,6 +202,10 @@ export function AccountHeader({
     `show-account-${accountId}-net-worth-chart`,
   );
   const showNetWorthChart = showNetWorthChartPref === 'true';
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const [preBudgetModePref] = useSyncedPref('registerPreBudgetFilter');
+  const preBudgetMode =
+    parsePreBudgetTransactionFilterMode(preBudgetModePref);
 
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
   const locale = useLocale();
@@ -323,6 +328,32 @@ export function AccountHeader({
               isFiltered={isFiltered}
               filteredAmount={filteredAmount}
             />
+            {budgetStartDate && (
+              <View
+                style={{
+                  color: theme.pageTextSubdued,
+                  fontSize: 11,
+                  marginTop: -4,
+                }}
+              >
+                {preBudgetMode === 'only' ? (
+                  <Trans>
+                    Budgeting starts on {{ budgetStartDate }}. Showing only
+                    pre-budget history.
+                  </Trans>
+                ) : preBudgetMode === 'hide' ? (
+                  <Trans>
+                    Budgeting starts on {{ budgetStartDate }}. Pre-budget
+                    history is hidden.
+                  </Trans>
+                ) : (
+                  <Trans>
+                    Budgeting starts on {{ budgetStartDate }}. Pre-budget
+                    history is still visible here.
+                  </Trans>
+                )}
+              </View>
+            )}
           </View>
 
           <BalanceHistoryGraph
@@ -516,6 +547,8 @@ export function AccountHeader({
                       showBalances={showBalances}
                       showCleared={showCleared}
                       showReconciled={showReconciled}
+                      hasBudgetStartDate={!!budgetStartDate}
+                      preBudgetMode={preBudgetMode}
                       onMenuSelect={onMenuSelect}
                     />
                   </Dialog>
@@ -554,6 +587,19 @@ export function AccountHeader({
                             ? t('Hide balance chart')
                             : t('Show balance chart'),
                         },
+                        ...(budgetStartDate
+                          ? [
+                              {
+                                name: 'cycle-pre-budget-filter',
+                                text:
+                                  preBudgetMode === 'all'
+                                    ? t('Hide pre-budget history')
+                                    : preBudgetMode === 'hide'
+                                      ? t('Show only pre-budget history')
+                                      : t('Show all transactions'),
+                              } as const,
+                            ]
+                          : []),
                       ]}
                     />
                   </Dialog>
@@ -732,6 +778,8 @@ type AccountMenuProps = {
   showCleared: boolean;
   showReconciled: boolean;
   isSorted: boolean;
+  hasBudgetStartDate: boolean;
+  preBudgetMode: 'all' | 'hide' | 'only';
   onMenuSelect: (
     item:
       | 'link'
@@ -743,7 +791,8 @@ type AccountMenuProps = {
       | 'remove-sorting'
       | 'toggle-cleared'
       | 'toggle-reconciled'
-      | 'toggle-net-worth-chart',
+      | 'toggle-net-worth-chart'
+      | 'cycle-pre-budget-filter',
   ) => void;
 };
 
@@ -756,6 +805,8 @@ function AccountMenu({
   showCleared,
   showReconciled,
   isSorted,
+  hasBudgetStartDate,
+  preBudgetMode,
   onMenuSelect,
 }: AccountMenuProps) {
   const { t } = useTranslation();
@@ -804,6 +855,19 @@ function AccountMenu({
             ? t('Hide reconciled transactions')
             : t('Show reconciled transactions'),
         },
+        ...(hasBudgetStartDate
+          ? [
+              {
+                name: 'cycle-pre-budget-filter',
+                text:
+                  preBudgetMode === 'all'
+                    ? t('Hide pre-budget history')
+                    : preBudgetMode === 'hide'
+                      ? t('Show only pre-budget history')
+                      : t('Show all transactions'),
+              } as const,
+            ]
+          : []),
         { name: 'export', text: t('Export') },
         ...(account && !account.closed
           ? canSync

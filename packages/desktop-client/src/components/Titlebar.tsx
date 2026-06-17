@@ -45,7 +45,10 @@ import { useSidebar } from './sidebar/SidebarProvider';
 import { ThemeSelector } from './ThemeSelector';
 
 function UncategorizedButton() {
-  const count: number | null = useSheetValue(bindings.uncategorizedCount());
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const count: number | null = useSheetValue(
+    bindings.uncategorizedCount(budgetStartDate),
+  );
   if (count === null || count <= 0) {
     return null;
   }

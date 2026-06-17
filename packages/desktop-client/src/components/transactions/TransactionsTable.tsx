@@ -127,10 +127,12 @@ import { useSelectedDispatch, useSelectedItems } from '#hooks/useSelected';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSplitsExpanded } from '#hooks/useSplitsExpanded';
 import type { SplitsExpandedContextValue } from '#hooks/useSplitsExpanded';
+import { useSyncedPref } from '#hooks/useSyncedPref';
 import { pushModal } from '#modals/modalsSlice';
 import { NotesTagFormatter } from '#notes/NotesTagFormatter';
 import { addNotification } from '#notifications/notificationsSlice';
 import { getPayeesById } from '#payees';
+import { isPreBudgetTransaction } from '#queries';
 import { aqlQuery } from '#queries/aqlQuery';
 import { useDispatch } from '#redux';
 import { getStatusLabel } from '#util/schedule';
@@ -1158,6 +1160,8 @@ const Transaction = memo(function Transaction({
   const schedule = transaction.schedule
     ? schedules.find(s => s.id === transaction.schedule)
     : null;
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
+  const isPreBudget = isPreBudgetTransaction(transaction, budgetStartDate);
 
   const previewStatus = forceUpcoming ? 'upcoming' : categoryId;
 
@@ -1348,6 +1352,9 @@ const Transaction = memo(function Transaction({
           ...(isPreview && {
             color: theme.tableTextInactive,
             fontStyle: 'italic',
+          }),
+          ...(isPreBudget && {
+            backgroundColor: theme.pillBackground,
           }),
           ...(_unmatched && { opacity: 0.5 }),
           ...(isBeingDragged && { opacity: 0.5 }),
@@ -1582,6 +1589,7 @@ const Transaction = memo(function Transaction({
         <NotesCell
           note={notes ?? ''}
           scheduleNote={isPreview ? schedule?.name : null}
+          badge={isPreBudget ? t('Pre-budget history') : null}
           focused={focusedField === 'notes'}
           valueStyle={valueStyle}
           onClickTag={onNotesTagClick}
@@ -1960,6 +1968,7 @@ const Transaction = memo(function Transaction({
 type NotesCellProps = {
   note: string;
   scheduleNote: string | null | undefined;
+  badge: string | null;
   focused: boolean;
   valueStyle: CSSProperties | null;
   onUpdate: (value: string) => void;
@@ -1970,6 +1979,7 @@ type NotesCellProps = {
 function NotesCell({
   note,
   scheduleNote,
+  badge,
   focused,
   valueStyle,
   onUpdate,
@@ -1997,9 +2007,25 @@ function NotesCell({
       name="notes"
       value={displayedNote}
       valueStyle={valueStyle}
-      formatter={value =>
-        NotesTagFormatter({ notes: value, onNotesTagClick: onClickTag })
-      }
+      formatter={value => (
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {badge && (
+            <Text
+              style={{
+                fontSize: 10,
+                color: theme.noticeText,
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {badge}
+            </Text>
+          )}
+          <View style={{ minWidth: 0, flex: 1 }}>
+            {NotesTagFormatter({ notes: value, onNotesTagClick: onClickTag })}
+          </View>
+        </View>
+      )}
       focused={focused}
       exposed={focused}
       onExpose={onExpose}

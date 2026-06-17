@@ -40,7 +40,9 @@ import { useCachedSchedules } from '#hooks/useCachedSchedules';
 import { useCategories } from '#hooks/useCategories';
 import { useDisplayPayee } from '#hooks/useDisplayPayee';
 import { usePayee } from '#hooks/usePayee';
+import { useSyncedPref } from '#hooks/useSyncedPref';
 import { NotesTagFormatter } from '#notes/NotesTagFormatter';
+import { isPreBudgetTransaction } from '#queries';
 import { useSelector } from '#redux';
 
 import { lookupName, Status } from './TransactionEdit';
@@ -94,6 +96,7 @@ export function TransactionListItem({
   const account = useAccount(transaction?.account || '');
   const transferAccount = useAccount(payee?.transfer_acct || '');
   const isPreview = isPreviewId(transaction?.id || '');
+  const [budgetStartDate] = useSyncedPref('budgetStartDate');
 
   const newTransactions = useSelector(
     state => state.transactions.newTransactions,
@@ -146,6 +149,7 @@ export function TransactionListItem({
 
   const prettyCategory = specialCategory || categoryName;
   const textStyle = getTextStyle({ isPreview });
+  const isPreBudget = isPreBudgetTransaction(transaction, budgetStartDate);
 
   return (
     <PressResponder {...mergeProps(pressProps, longPressProps)}>
@@ -261,6 +265,18 @@ export function TransactionListItem({
                 >
                   {prettyCategory || t('Uncategorized')}
                 </TextOneLine>
+                {isPreBudget && (
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: '600',
+                      color: theme.noticeText,
+                      marginLeft: 6,
+                    }}
+                  >
+                    {t('Pre-budget history')}
+                  </Text>
+                )}
               </View>
             )}
             {notes && (

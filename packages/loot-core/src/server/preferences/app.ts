@@ -1,6 +1,7 @@
 import * as asyncStorage from '#platform/server/asyncStorage';
 import * as fs from '#platform/server/fs';
 import { createApp } from '#server/app';
+import { applyBudgetStartDate } from '#server/budget/budget-start';
 import * as db from '#server/db';
 import { PostError } from '#server/errors';
 import { getDefaultDocumentDir } from '#server/main';
@@ -18,6 +19,7 @@ import type { GlobalPrefs, MetadataPrefs, SyncedPrefs } from '#types/prefs';
 export type PreferencesHandlers = {
   'preferences/save': typeof saveSyncedPrefs;
   'preferences/get': typeof getSyncedPrefs;
+  'budget-start/apply': typeof applyBudgetStartDate;
   'save-global-prefs': typeof saveGlobalPrefs;
   'load-global-prefs': typeof loadGlobalPrefs;
   'save-prefs': typeof saveMetadataPrefs;
@@ -29,6 +31,7 @@ export const app = createApp<PreferencesHandlers>();
 
 app.method('preferences/save', mutator(undoable(saveSyncedPrefs)));
 app.method('preferences/get', getSyncedPrefs);
+app.method('budget-start/apply', mutator(undoable(applyBudgetStartDate)));
 app.method('save-global-prefs', saveGlobalPrefs);
 app.method('load-global-prefs', loadGlobalPrefs);
 app.method('save-prefs', saveMetadataPrefs);
