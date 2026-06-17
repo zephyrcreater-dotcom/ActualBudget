@@ -25,6 +25,7 @@ import { useDispatch, useSelector } from '#redux';
 import { UserAccessPage } from './admin/UserAccess/UserAccessPage';
 import { UserDirectoryPage } from './admin/UserDirectory/UserDirectoryPage';
 import { BankSyncStatus } from './BankSyncStatus';
+import { BudgetSetupCalculatorPage } from './budget-setup/BudgetSetupCalculatorPage';
 import { CommandBar } from './CommandBar';
 import { EnableBankingCallback } from './EnableBankingCallback';
 import { FeatureErrorFallback } from './FeatureErrorFallback';
@@ -270,6 +271,10 @@ export function FinancesApp() {
                     path="/budget"
                     element={<NarrowAlternate name="Budget" />}
                   />
+                  <Route
+                    path="/budget-setup"
+                    element={<BudgetSetupCalculatorPage />}
+                  />
 
                   <Route
                     path="/schedules"
@@ -428,6 +433,7 @@ export function FinancesApp() {
               <Routes>
                 <Route path="/dashboard" element={<MobileNavTabs />} />
                 <Route path="/budget" element={<MobileNavTabs />} />
+                <Route path="/budget-setup" element={<MobileNavTabs />} />
                 <Route path="/accounts" element={<MobileNavTabs />} />
                 <Route path="/settings" element={<MobileNavTabs />} />
                 <Route path="/reports" element={<MobileNavTabs />} />

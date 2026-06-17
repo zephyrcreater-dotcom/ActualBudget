@@ -1,3 +1,5 @@
+import type { IntegerAmount } from '#shared/util';
+
 export type FeatureFlag =
   | 'goalTemplatesEnabled'
   | 'goalTemplatesUIEnabled'
@@ -81,6 +83,43 @@ export type MetadataPrefs = Partial<{
   userId: string; // TODO: delete this (unused)
 }>;
 
+export type BudgetSetupAllocationMode =
+  | 'fixed'
+  | 'pct-income'
+  | 'pct-leftover'
+  | 'pct-remaining';
+
+export type BudgetSetupCalculatorRowDraft = {
+  id: string;
+  name: string;
+  amount: IntegerAmount;
+  amountMode?: BudgetSetupAllocationMode;
+  amountPct?: number;
+  categoryId?: string | null;
+  groupId?: string | null;
+  newGroupName?: string;
+  categoryMappingOpen?: boolean;
+  dueDate?: string;
+  source?: 'manual' | 'suggested';
+  suggestionKey?: string | null;
+};
+
+export type BudgetSetupCalculatorDraft = {
+  incomeAccountIds: string[];
+  analysisStartDate: string;
+  analysisEndDate: string;
+  incomeTransactionIds: string[];
+  selectedSuggestedBillKeys: string[];
+  bills: BudgetSetupCalculatorRowDraft[];
+  savings: BudgetSetupCalculatorRowDraft[];
+  flexible: BudgetSetupCalculatorRowDraft[];
+};
+
+export type BudgetSetupCalculatorState = {
+  selectedMonth: string;
+  drafts: Record<string, BudgetSetupCalculatorDraft>;
+};
+
 /**
  * Local preferences applicable to a single device. Stored in local storage.
  */
@@ -98,6 +137,7 @@ export type LocalPrefs = Partial<{
   reportsViewLabel: boolean;
   sidebarWidth: number;
   'mobile.showSpentColumn': boolean;
+  'budgetSetupCalculator.state': BudgetSetupCalculatorState;
 }>;
 
 export type Theme = 'light' | 'dark' | 'auto' | 'midnight' | string;

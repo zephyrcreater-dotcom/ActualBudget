@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import {
+  SvgCalculator,
   SvgCog,
   SvgLibrary,
   SvgPiggyBank,
@@ -101,6 +102,12 @@ export function CommandBar() {
   const navigationItems = useMemo(
     () => [
       { id: 'budget', name: t('Budget'), path: '/budget', Icon: SvgWallet },
+      {
+        id: 'budget-setup',
+        name: t('Budget Setup Calculator'),
+        path: '/budget-setup',
+        Icon: SvgCalculator,
+      },
       {
         id: 'reports-nav',
         name: t('Reports'),
